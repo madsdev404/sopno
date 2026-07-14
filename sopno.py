@@ -6,6 +6,8 @@ from gtts import gTTS
 import os
 import subprocess
 import ollama
+import asyncio
+import edge_tts
 
 # ==============================================================================
 # CONFIGURATION & CONSTANTS
@@ -30,21 +32,32 @@ MAX_HISTORY_LENGTH = 13
 def speak_text(text):
     """
     Intelligently detects the language of the response and vocalizes it
-    using Google Text-to-Speech (gTTS) played via system ffplay.
+    using Microsoft Edge Neural TTS played via system ffplay, with a fallback to gTTS.
     """
-    # Detect if text contains any Bangla Unicode characters
     is_bn = bool(re.search(r'[\u0980-\u09FF]', text))
-    target_lang = "bn" if is_bn else "en"
+    # Using natural neural voices: Nabanita (Bengali Female) or Aria (English Female)
+    voice = "bn-BD-NabanitaNeural" if is_bn else "en-US-AriaNeural"
     
     temp_file = "temp_speech.mp3"
+    
+    async def generate_speech():
+        communicate = edge_tts.Communicate(text, voice)
+        await communicate.save(temp_file)
+        
     try:
-        # Generate speech
-        tts = gTTS(text=text, lang=target_lang, slow=False)
-        tts.save(temp_file)
+        # Run async generation in a synchronous context
+        asyncio.run(generate_speech())
         # Play the audio using system ffplay (fully silent and auto-exit)
         subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_file])
     except Exception as e:
-        print(f"\n[Warning: Speech synthesis/playback failed: {e}]")
+        print(f"\n[Warning: Edge TTS failed ({e}). Falling back to Google TTS...]")
+        try:
+            target_lang = "bn" if is_bn else "en"
+            tts = gTTS(text=text, lang=target_lang, slow=False)
+            tts.save(temp_file)
+            subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_file])
+        except Exception as fallback_err:
+            print(f"[Warning: Google TTS fallback also failed: {fallback_err}]")
     finally:
         # Clean up the temporary file
         if os.path.exists(temp_file):
