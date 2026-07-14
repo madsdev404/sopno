@@ -69,10 +69,20 @@ def speak_text(text):
 # ==============================================================================
 # STT BILINGUAL RECOGNIZER
 # ==============================================================================
-def recognize_bilingual(r, audio):
+_whisper_model = None
+
+def get_whisper_model():
+    """Loads and returns the offline Faster Whisper model as a singleton."""
+    global _whisper_model
+    if _whisper_model is None:
+        from faster_whisper import WhisperModel
+        # Using tiny model on CPU with int8 quantization for speed, efficiency, and low RAM
+        _whisper_model = WhisperModel("tiny", device="cpu", compute_type="int8")
+    return _whisper_model
+
+def recognize_bilingual_google(r, audio):
     """
-    Recognizes the spoken utterance in parallel using Google Speech Recognition
-    for both English and Bangla. Selects the most coherent transcription.
+    Fallback Google Speech Recognition for bilingual English/Bangla.
     """
     def recognize_lang(lang):
         try:
@@ -111,6 +121,43 @@ def recognize_bilingual(r, audio):
         return bn_res
     else:
         return en_res
+
+def recognize_bilingual(r, audio):
+    """
+    Recognizes the spoken utterance offline using Faster Whisper.
+    Works for both English and Bangla natively, with automatic fallback to Google STT.
+    """
+    import tempfile
+    
+    try:
+        # Load whisper model
+        model = get_whisper_model()
+        
+        # Save audio to temporary wav file
+        with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as temp_wav:
+            temp_wav_path = temp_wav.name
+            
+        try:
+            with open(temp_wav_path, "wb") as f:
+                f.write(audio.get_wav_data())
+                
+            segments, info = model.transcribe(temp_wav_path, beam_size=5)
+            text = " ".join([segment.text for segment in segments]).strip()
+            
+            if not text:
+                raise sr.UnknownValueError("Whisper detected empty transcription.")
+                
+            return text
+        finally:
+            if os.path.exists(temp_wav_path):
+                try:
+                    os.remove(temp_wav_path)
+                except Exception:
+                    pass
+                
+    except Exception as e:
+        # Fallback to Google STT if anything fails
+        return recognize_bilingual_google(r, audio)
 
 # ==============================================================================
 # CONVERSATION MEMORY SUMMARIZATION

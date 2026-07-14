@@ -85,39 +85,93 @@ class AssistantWorker(QObject):
         speak_text(welcome)
         self.status_changed.emit("standby")
         
+        # Determine if we should use Picovoice Porcupine or fallback SpeechRecognition
+        access_key = self.config.get("picovoice_access_key", "").strip()
+        use_porcupine = False
+        porcupine = None
+        
+        if access_key:
+            try:
+                import pvporcupine
+                
+                # Porcupine supports: 'alexa', 'americano', 'blueberry', 'bumblebee', 'computer', 'grapefruit', 'grasshopper', 'hey google', 'hey siri', 'jarvis', 'ok google', 'picovoice', 'porcupine', 'terminator'
+                config_keywords = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
+                supported_keywords = [
+                    "alexa", "americano", "blueberry", "bumblebee", "computer", "grapefruit", 
+                    "grasshopper", "hey google", "hey siri", "jarvis", "ok google", "picovoice", 
+                    "porcupine", "terminator"
+                ]
+                
+                porcupine_keywords = [kw.lower() for kw in config_keywords if kw.lower() in supported_keywords]
+                if not porcupine_keywords:
+                    porcupine_keywords = ["computer"]
+                    
+                porcupine = pvporcupine.create(access_key=access_key, keywords=porcupine_keywords)
+                use_porcupine = True
+                self.log_message.emit(f"Picovoice Porcupine active. Wake words: {porcupine_keywords}")
+            except Exception as e:
+                self.log_message.emit(f"Failed to load Picovoice Porcupine ({e}). Falling back to continuous SpeechRecognition.")
+                use_porcupine = False
+        else:
+            self.log_message.emit("No Picovoice Access Key. Using continuous SpeechRecognition for wake words.")
+            
         # Local wake word implementation or continuous listening
-        # To avoid requiring Picovoice, we continuously listen. If we hear "Sopno" or "সোপনো", we trigger command mode.
-        # Alternatively, since users want it always alive, we run a quick listening loop.
         while self.running:
             try:
-                with sr.Microphone() as source:
+                triggered = False
+                
+                if use_porcupine and porcupine is not None:
+                    from pvrecorder import PvRecorder
                     self.status_changed.emit("standby")
-                    self.log_message.emit("Listening for wake word or greeting...")
+                    self.log_message.emit("Listening for wake word (Picovoice)...")
+                    
+                    recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
+                    recorder.start()
+                    
                     try:
-                        # Short capture to check for wake words
-                        audio = r.listen(source, timeout=5, phrase_time_limit=4)
-                    except sr.WaitTimeoutError:
+                        while self.running:
+                            pcm = recorder.read()
+                            result = porcupine.process(pcm)
+                            if result >= 0:
+                                triggered = True
+                                break
+                    finally:
+                        try:
+                            recorder.stop()
+                            recorder.delete()
+                        except Exception:
+                            pass
+                            
+                    if not triggered:
                         continue
-                    except Exception as e:
-                        time.sleep(0.5)
+                else:
+                    with sr.Microphone() as source:
+                        self.status_changed.emit("standby")
+                        self.log_message.emit("Listening for wake word (SpeechRecognition)...")
+                        try:
+                            # Short capture to check for wake words
+                            audio = r.listen(source, timeout=5, phrase_time_limit=4)
+                        except sr.WaitTimeoutError:
+                            continue
+                        except Exception as e:
+                            time.sleep(0.5)
+                            continue
+                            
+                    # Transcribe speech
+                    try:
+                        self.log_message.emit("Checking transcription...")
+                        text = recognize_bilingual(r, audio)
+                        self.log_message.emit(f"Heard: {text}")
+                    except Exception:
+                        # Ignore unrecognized sounds
                         continue
-                        
-                # Transcribe speech
-                try:
-                    self.log_message.emit("Checking transcription...")
-                    text = recognize_bilingual(r, audio)
-                    self.log_message.emit(f"Heard: {text}")
-                except Exception:
-                    # Ignore unrecognized sounds
-                    continue
+                    
+                    # Check wake word
+                    text_lower = text.lower().strip()
+                    wake_words = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
+                    triggered = any(ww in text_lower for ww in wake_words) or "sopno" in text_lower or "সোপন" in text_lower
                 
-                # Check wake word
-                text_lower = text.lower().strip()
-                wake_words = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
-                triggered = any(ww in text_lower for ww in wake_words)
-                
-                # If triggered, or if they spoke to us directly
-                if triggered or "sopno" in text_lower or "সোপন" in text_lower:
+                if triggered:
                     self.log_message.emit("Wake word detected!")
                     # Speak a quick acknowledging sound or greeting
                     self.status_changed.emit("listening")
@@ -246,6 +300,13 @@ class AssistantWorker(QObject):
             except Exception as e:
                 self.log_message.emit(f"Main loop error: {e}")
                 time.sleep(1)
+
+        # Cleanup Picovoice Resources
+        if porcupine is not None:
+            try:
+                porcupine.delete()
+            except Exception:
+                pass
 
 
 class SopnoHUDWindow(QMainWindow):
