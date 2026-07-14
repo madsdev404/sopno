@@ -1,0 +1,11 @@
+{
+  "model_name": "gemma3:4b",
+  "picovoice_access_key": "",
+  "wake_words": ["sopno", "সোপনো", "dream"],
+  "voice_lang_bn": "bn",
+  "voice_lang_en": "en",
+  "pause_threshold": 0.8,
+  "dynamic_energy_threshold": true,
+  "hud_opacity": 0.85,
+  "hud_position": "top-right"
+}
