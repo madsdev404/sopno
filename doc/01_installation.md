@@ -16,10 +16,7 @@ sudo apt update
 # PyAudio installation-er jonno PortAudio utility install korun
 sudo apt install -y python3-dev portaudio19-dev
 
-# TTS (Text-to-Speech) offline rendering-er jonno espeak install korun
-sudo apt install -y espeak
-
-# Audio processing & Speech Recognition helper tools (optional but recommended)
+# TTS rendering playback and helper tools (Mandatory for playing audio)
 sudo apt install -y ffmpeg flac
 ```
 
@@ -49,8 +46,8 @@ pip install --upgrade pip
 # Install official Ollama client
 pip install ollama
 
-# Install Offline Text-to-Speech library (Mouth)
-pip install pyttsx3
+# Install Natural Human-like Text-to-Speech library (Mouth)
+pip install gTTS
 
 # Install Speech Recognition library (Ears)
 pip install SpeechRecognition
@@ -66,10 +63,14 @@ Sob install sesh hole system-er configuration properly setup hoyeche kina ta che
 
 ### Check Speakers (TTS):
 ```python
-import pyttsx3
-engine = pyttsx3.init()
-engine.say("Hello. Sopno assistant system is successfully configured.")
-engine.runAndWait()
+from gtts import gTTS
+import subprocess
+import os
+
+tts = gTTS(text="Hello. Sopno assistant system is successfully configured.", lang="en")
+tts.save("test.mp3")
+subprocess.run(["ffplay", "-nodisp", "-autoexit", "test.mp3"])
+os.remove("test.mp3")
 ```
 
 ### Check Microphone (STT):

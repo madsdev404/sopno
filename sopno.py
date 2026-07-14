@@ -2,7 +2,9 @@ import sys
 import re
 import concurrent.futures
 import speech_recognition as sr
-import pyttsx3
+from gtts import gTTS
+import os
+import subprocess
 import ollama
 
 # ==============================================================================
@@ -25,44 +27,31 @@ MAX_HISTORY_LENGTH = 13
 # ==============================================================================
 # TTS HELPER FUNCTION
 # ==============================================================================
-def speak_text(engine, text):
+def speak_text(text):
     """
     Intelligently detects the language of the response and vocalizes it
-    using the appropriate system voice and speed.
+    using Google Text-to-Speech (gTTS) played via system ffplay.
     """
     # Detect if text contains any Bangla Unicode characters
     is_bn = bool(re.search(r'[\u0980-\u09FF]', text))
     target_lang = "bn" if is_bn else "en"
     
-    # Try to find a matching voice from system voices
-    voices = engine.getProperty('voices')
-    selected_voice = None
-    
-    # First pass: look for exact/prefix match in voice languages
-    for voice in voices:
-        langs = voice.languages or []
-        if any(l.startswith(target_lang) for l in langs if l):
-            selected_voice = voice.id
-            break
-            
-    # Second pass fallback: search for target language string in voice ID
-    if not selected_voice:
-        for voice in voices:
-            if target_lang in voice.id.lower():
-                selected_voice = voice.id
-                break
-                
-    if selected_voice:
-        engine.setProperty('voice', selected_voice)
-        
-    # Set speech speed (Bangla is usually spoken slower for clarity with espeak)
-    if is_bn:
-        engine.setProperty('rate', 135)
-    else:
-        engine.setProperty('rate', 155)
-        
-    engine.say(text)
-    engine.runAndWait()
+    temp_file = "temp_speech.mp3"
+    try:
+        # Generate speech
+        tts = gTTS(text=text, lang=target_lang, slow=False)
+        tts.save(temp_file)
+        # Play the audio using system ffplay (fully silent and auto-exit)
+        subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_file])
+    except Exception as e:
+        print(f"\n[Warning: Speech synthesis/playback failed: {e}]")
+    finally:
+        # Clean up the temporary file
+        if os.path.exists(temp_file):
+            try:
+                os.remove(temp_file)
+            except Exception:
+                pass
 
 # ==============================================================================
 # STT BILINGUAL RECOGNIZER
@@ -166,13 +155,6 @@ def main():
     print("           SOPNO (DREAM) VOICE ASSISTANT          ")
     print("=" * 60)
     print(f"Status:   Initializing Speech engines...")
-    
-    try:
-        engine = pyttsx3.init()
-    except Exception as e:
-        print(f"Error: Could not initialize TTS engine: {e}")
-        print("Please ensure 'espeak' is installed on your Linux system.")
-        sys.exit(1)
         
     r = sr.Recognizer()
     
@@ -196,7 +178,7 @@ def main():
     # Initial greeting
     welcome_text = "Hello! Sopno voice assistant is ready. Press Enter to start speaking."
     print(f"Sopno: {welcome_text}")
-    speak_text(engine, welcome_text)
+    speak_text(welcome_text)
     
     # Initialize messages history with system prompt
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
@@ -209,7 +191,7 @@ def main():
             if user_input.lower() in ['exit', 'quit', 'exit()']:
                 farewell = "Goodbye! Have a great day."
                 print(f"\nSopno: {farewell}")
-                speak_text(engine, farewell)
+                speak_text(farewell)
                 break
                 
             # Perform Voice Input capturing
@@ -230,12 +212,12 @@ def main():
             except sr.UnknownValueError:
                 err_text = "Sorry, I couldn't understand that. Please speak clearly."
                 print(f"Sopno: {err_text}")
-                speak_text(engine, err_text)
+                speak_text(err_text)
                 continue
             except sr.RequestError as e:
                 err_text = "I encountered an issue connecting to the speech service."
                 print(f"Sopno: {err_text} ({e})")
-                speak_text(engine, err_text)
+                speak_text(err_text)
                 continue
                 
             # Append user utterance to conversation history
@@ -263,13 +245,13 @@ def main():
                 
             except Exception as e:
                 print(f"\nError communicating with Ollama: {e}")
-                speak_text(engine, "Sorry, I had trouble processing that with the AI model.")
+                speak_text("Sorry, I had trouble processing that with the AI model.")
                 # Rollback last user input if it failed to process
                 messages.pop()
                 continue
                 
             # Speak the complete response
-            speak_text(engine, full_response)
+            speak_text(full_response)
             
             # Save the assistant's reply to the message history
             messages.append({"role": "assistant", "content": full_response})
