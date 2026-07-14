@@ -180,6 +180,9 @@ def main():
     print(f"Sopno: {welcome_text}")
     speak_text(welcome_text)
     
+    # Track current active voice/response language (starts as English)
+    current_language = "en"
+    
     # Initialize messages history with system prompt
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
@@ -220,6 +223,28 @@ def main():
                 speak_text(err_text)
                 continue
                 
+            # Check for language change commands
+            text_lower = text.lower()
+            bangla_keywords = ["speak in bangla", "change to bangla", "talk in bangla", "banglay kotha bolo", "বাংলায় কথা বলো", "বাংলা করো", "বাংলায় বল"]
+            english_keywords = ["speak in english", "change to english", "talk in english", "english-e kotha bolo", "ইংরেজিতে কথা বলো", "english-e bol", "ইংরেজিতে বল"]
+            
+            if any(kw in text_lower for kw in bangla_keywords):
+                current_language = "bn"
+                switch_text = "ঠিক আছে, আমি এখন থেকে বাংলায় কথা বলব।"
+                print(f"Sopno: {switch_text}")
+                speak_text(switch_text)
+                messages.append({"role": "user", "content": text})
+                messages.append({"role": "assistant", "content": switch_text})
+                continue
+            elif any(kw in text_lower for kw in english_keywords):
+                current_language = "en"
+                switch_text = "Sure, I will speak in English from now on."
+                print(f"Sopno: {switch_text}")
+                speak_text(switch_text)
+                messages.append({"role": "user", "content": text})
+                messages.append({"role": "assistant", "content": switch_text})
+                continue
+                
             # Append user utterance to conversation history
             messages.append({"role": "user", "content": text})
             
@@ -227,12 +252,19 @@ def main():
             if len(messages) >= MAX_HISTORY_LENGTH:
                 messages = summarize_history(messages)
                 
+            # Prepare messages list with active language constraint to guide the model
+            chat_messages = messages.copy()
+            if current_language == "bn":
+                chat_messages.append({"role": "system", "content": "IMPORTANT: You MUST respond in Bangla (বাংলা) only."})
+            else:
+                chat_messages.append({"role": "system", "content": "IMPORTANT: You MUST respond in English only."})
+                
             # Get response from Gemma-3 via Ollama (Streaming response)
             print("\nSopno: ", end="", flush=True)
             try:
                 stream = ollama.chat(
                     model=MODEL_NAME,
-                    messages=messages,
+                    messages=chat_messages,
                     stream=True
                 )
                 
