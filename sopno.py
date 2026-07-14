@@ -186,26 +186,23 @@ def main():
     # Initialize messages history with system prompt
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
+    # Configure Speech Recognizer settings for natural continuous listening
+    r.dynamic_energy_threshold = True
+    r.pause_threshold = 0.8  # Wait 0.8s after speech stops before transcribing
+    
+    print("\nSopno is listening continuously. Speak anytime! (Say 'exit' or 'quit' to stop)\n")
+    
     while True:
         try:
-            print("\n" + "-" * 40)
-            user_input = input(">>> [Press Enter to speak, or type 'exit' to quit]: ").strip()
-            
-            if user_input.lower() in ['exit', 'quit', 'exit()']:
-                farewell = "Goodbye! Have a great day."
-                print(f"\nSopno: {farewell}")
-                speak_text(farewell)
-                break
-                
             # Perform Voice Input capturing
             with sr.Microphone() as source:
-                print("Listening... (Speak now)")
+                print("Listening...")
                 try:
-                    # Capture audio with robust timeouts to prevent freezing
-                    audio = r.listen(source, timeout=6, phrase_time_limit=10)
+                    # Capture audio without timeout (wait until user starts speaking)
+                    audio = r.listen(source, timeout=None, phrase_time_limit=10)
                     print("Processing speech...")
-                except sr.WaitTimeoutError:
-                    print("Listening timed out. No speech detected. Please press Enter and try again.")
+                except Exception as e:
+                    # Handle transient microphone glitches silently
                     continue
                     
             # Recognize text using bilingual parallel recognition
@@ -213,15 +210,21 @@ def main():
                 text = recognize_bilingual(r, audio)
                 print(f"You said: {text}")
             except sr.UnknownValueError:
-                err_text = "Sorry, I couldn't understand that. Please speak clearly."
-                print(f"Sopno: {err_text}")
-                speak_text(err_text)
+                # Silently ignore noise or un-decodable audio
                 continue
             except sr.RequestError as e:
                 err_text = "I encountered an issue connecting to the speech service."
                 print(f"Sopno: {err_text} ({e})")
                 speak_text(err_text)
                 continue
+                
+            # Check for exit commands
+            text_clean = text.lower().strip().replace(".", "").replace("?", "").replace("!", "")
+            if text_clean in ['exit', 'quit', 'goodbye', 'bye', 'exit()', 'বিদায়']:
+                farewell = "Goodbye! Have a great day."
+                print(f"\nSopno: {farewell}")
+                speak_text(farewell)
+                break
                 
             # Check for language change commands
             text_lower = text.lower()
