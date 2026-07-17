@@ -368,33 +368,51 @@ To go from "terminal script" to "always-alive Jarvis", here are the missing piec
 
 **Why:** This is the core of "always alive". Without it, you have to switch to a terminal and press run — that's not Jarvis.
 
-**How:** Use [Porcupine](https://github.com/Picovoice/porcupine) by Picovoice — it's free for personal use, runs offline, and uses <1% CPU.
+**How:** Use `sherpa-onnx` Keyword Spotter with a pre-trained Gigaspeech Zipformer model — it is 100% free, runs offline, requires no API access keys, and allows custom wake words to be defined on the fly.
 
 ```bash
-pip install pvporcupine pvrecorder
+# Install libraries
+pip install sherpa-onnx pvrecorder numpy
 ```
 
 ```python
-import pvporcupine
-import pvrecorder
+import os
+import numpy as np
+import sherpa_onnx
+from pvrecorder import PvRecorder
 
-porcupine = pvporcupine.create(
-    access_key="YOUR_FREE_KEY_FROM_PICOVOICE_CONSOLE",
-    keywords=["hey google"]  # Use built-in or train custom "hey sopno"
+# Initialize Keyword Spotter with a local model
+kws = sherpa_onnx.KeywordSpotter(
+    tokens="models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/tokens.txt",
+    encoder="models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+    decoder="models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+    joiner="models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01/joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx",
+    num_threads=1,
+    keywords_file="models/active_keywords.txt",  # Contains custom BPE-tokenized keywords (e.g. ▁SO P N O :1.5)
+    provider="cpu",
 )
-recorder = pvrecorder.PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
+
+recorder = PvRecorder(device_index=-1, frame_length=512)
 recorder.start()
 
+stream = kws.create_stream()
 print("Listening for wake word...")
+
 while True:
     pcm = recorder.read()
-    result = porcupine.process(pcm)
-    if result >= 0:
-        print("Wake word detected! Sopno is listening...")
+    # Normalize PCM samples to float32 [-1, 1]
+    samples = np.array(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+    stream.accept_waveform(16000, samples)
+    
+    while kws.is_ready(stream):
+        kws.decode_stream(stream)
+        
+    result = kws.get_result(stream)
+    if result != "":
+        print(f"Wake word detected: {result}")
+        kws.reset_stream(stream)
         # → Trigger STT here
 ```
-
-Get your free key at: https://console.picovoice.ai/
 
 ---
 
@@ -639,7 +657,7 @@ Current:  Google STT → gemma3:4b → gTTS
 Upgraded: faster-whisper → gemma3:4b + tools → edge-tts/piper
 Daemon:   systemd service
 HUD:      PyQt5 floating overlay
-Wake:     Porcupine wake word
+Wake:     sherpa-onnx KWS
 ```
 
 ### Full Upgraded Dependencies
@@ -651,8 +669,8 @@ pip install faster-whisper
 # Better TTS
 pip install edge-tts
 
-# Wake word (get key from picovoice.ai)
-pip install pvporcupine pvrecorder
+# Wake word (offline, no key needed)
+pip install sherpa-onnx pvrecorder numpy
 
 # Desktop HUD
 pip install PyQt5
@@ -749,7 +767,7 @@ pulseaudio --check && echo "Running" || pulseaudio --start
 - Ensure no other heavy apps are running
 
 ### Wake word not triggering
-- Get a free API key from https://console.picovoice.ai/
+- Ensure the model files are located inside `models/`
 - Try increasing microphone sensitivity in system settings
 - Make sure you're not in a loud environment
 

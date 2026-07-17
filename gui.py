@@ -85,54 +85,113 @@ class AssistantWorker(QObject):
         speak_text(welcome)
         self.status_changed.emit("standby")
         
-        # Determine if we should use Picovoice Porcupine or fallback SpeechRecognition
-        access_key = self.config.get("picovoice_access_key", "").strip()
-        use_porcupine = False
-        porcupine = None
+        # Determine if we should use sherpa-onnx or fallback SpeechRecognition
+        use_sherpa = False
+        kws = None
         
-        if access_key:
+        base_dir = os.path.dirname(os.path.abspath(__file__))
+        model_dir = os.path.join(base_dir, "models", "sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01")
+        tokens_path = os.path.join(model_dir, "tokens.txt")
+        encoder_path = os.path.join(model_dir, "encoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx")
+        decoder_path = os.path.join(model_dir, "decoder-epoch-12-avg-2-chunk-16-left-64.int8.onnx")
+        joiner_path = os.path.join(model_dir, "joiner-epoch-12-avg-2-chunk-16-left-64.int8.onnx")
+        
+        if os.path.exists(tokens_path) and os.path.exists(encoder_path):
             try:
-                import pvporcupine
+                import sherpa_onnx
+                import numpy as np
                 
-                # Porcupine supports: 'alexa', 'americano', 'blueberry', 'bumblebee', 'computer', 'grapefruit', 'grasshopper', 'hey google', 'hey siri', 'jarvis', 'ok google', 'picovoice', 'porcupine', 'terminator'
+                # Load tokens to perform greedy BPE tokenization
+                tokens = {}
+                with open(tokens_path, "r", encoding="utf-8") as f:
+                    for line in f:
+                        parts = line.strip().split()
+                        if len(parts) == 2:
+                            tokens[parts[0]] = int(parts[1])
+                            
+                def tokenize_word(word):
+                    word_to_match = "▁" + word.upper().replace(" ", "▁")
+                    sorted_tokens = sorted(tokens.keys(), key=len, reverse=True)
+                    result_tokens = []
+                    i = 0
+                    while i < len(word_to_match):
+                        matched = False
+                        for t in sorted_tokens:
+                            if word_to_match[i:].startswith(t):
+                                result_tokens.append(t)
+                                i += len(t)
+                                matched = True
+                                break
+                        if not matched:
+                            result_tokens.append(word_to_match[i])
+                            i += 1
+                    return " ".join(result_tokens)
+                
                 config_keywords = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
-                supported_keywords = [
-                    "alexa", "americano", "blueberry", "bumblebee", "computer", "grapefruit", 
-                    "grasshopper", "hey google", "hey siri", "jarvis", "ok google", "picovoice", 
-                    "porcupine", "terminator"
-                ]
-                
-                porcupine_keywords = [kw.lower() for kw in config_keywords if kw.lower() in supported_keywords]
-                if not porcupine_keywords:
-                    porcupine_keywords = ["computer"]
+                keywords_to_register = []
+                for kw in config_keywords:
+                    kw_clean = kw.lower().strip()
+                    if kw_clean in ["সোপনো", "সোপন"]:
+                        kw_clean = "sopno"
+                    kw_clean = re.sub(r'[^a-zA-Z\s]', '', kw_clean)
+                    if kw_clean:
+                        token_seq = tokenize_word(kw_clean)
+                        if token_seq:
+                            keywords_to_register.append(f"{token_seq} :1.5")
+                            
+                if not keywords_to_register:
+                    keywords_to_register = ["▁SO P N O :1.5", "▁DR E A M :1.5"]
                     
-                porcupine = pvporcupine.create(access_key=access_key, keywords=porcupine_keywords)
-                use_porcupine = True
-                self.log_message.emit(f"Picovoice Porcupine active. Wake words: {porcupine_keywords}")
+                temp_keywords_path = os.path.join(model_dir, "active_keywords.txt")
+                with open(temp_keywords_path, "w", encoding="utf-8") as f:
+                    for kw_line in keywords_to_register:
+                        f.write(kw_line + "\n")
+                        
+                kws = sherpa_onnx.KeywordSpotter(
+                    tokens=tokens_path,
+                    encoder=encoder_path,
+                    decoder=decoder_path,
+                    joiner=joiner_path,
+                    num_threads=1,
+                    keywords_file=temp_keywords_path,
+                    provider="cpu",
+                )
+                use_sherpa = True
+                self.log_message.emit(f"sherpa-onnx KWS active. Wake words: {config_keywords}")
             except Exception as e:
-                self.log_message.emit(f"Failed to load Picovoice Porcupine ({e}). Falling back to continuous SpeechRecognition.")
-                use_porcupine = False
+                self.log_message.emit(f"Failed to load sherpa-onnx ({e}). Falling back to continuous SpeechRecognition.")
+                use_sherpa = False
         else:
-            self.log_message.emit("No Picovoice Access Key. Using continuous SpeechRecognition for wake words.")
+            self.log_message.emit("sherpa-onnx model files not found. Using continuous SpeechRecognition for wake words.")
             
         # Local wake word implementation or continuous listening
         while self.running:
             try:
                 triggered = False
                 
-                if use_porcupine and porcupine is not None:
+                if use_sherpa and kws is not None:
                     from pvrecorder import PvRecorder
-                    self.status_changed.emit("standby")
-                    self.log_message.emit("Listening for wake word (Picovoice)...")
+                    import numpy as np
                     
-                    recorder = PvRecorder(device_index=-1, frame_length=porcupine.frame_length)
+                    self.status_changed.emit("standby")
+                    self.log_message.emit("Listening for wake word (sherpa-onnx)...")
+                    
+                    recorder = PvRecorder(device_index=-1, frame_length=512)
                     recorder.start()
+                    stream = kws.create_stream()
                     
                     try:
                         while self.running:
                             pcm = recorder.read()
-                            result = porcupine.process(pcm)
-                            if result >= 0:
+                            samples = np.array(pcm, dtype=np.int16).astype(np.float32) / 32768.0
+                            stream.accept_waveform(16000, samples)
+                            
+                            while kws.is_ready(stream):
+                                kws.decode_stream(stream)
+                                
+                            result = kws.get_result(stream)
+                            if result != "":
+                                kws.reset_stream(stream)
                                 triggered = True
                                 break
                     finally:
@@ -300,13 +359,6 @@ class AssistantWorker(QObject):
             except Exception as e:
                 self.log_message.emit(f"Main loop error: {e}")
                 time.sleep(1)
-
-        # Cleanup Picovoice Resources
-        if porcupine is not None:
-            try:
-                porcupine.delete()
-            except Exception:
-                pass
 
 
 class SopnoHUDWindow(QMainWindow):

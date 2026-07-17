@@ -116,3 +116,6 @@ test_out.mp3
 test_out_gtts.mp3
 test.mp3
 test_bn.mp3
+
+# Machine learning models
+models/

@@ -46,14 +46,37 @@ pip install --upgrade pip
 # Install official Ollama client
 pip install ollama
 
-# Install Natural Human-like Text-to-Speech library (Mouth)
-pip install gTTS
+# Install Edge-TTS and gTTS (Voice output)
+pip install edge-tts gTTS
 
-# Install Speech Recognition library (Ears)
-pip install SpeechRecognition
+# Install Speech Recognition and Whisper (Voice transcription)
+pip install SpeechRecognition faster-whisper
 
-# Install PyAudio (Mic inputs record korar jonno dependency)
+# Install PyAudio (Mic inputs record)
 pip install pyaudio
+
+# Install sherpa-onnx and pvrecorder (Wake word detection)
+pip install sherpa-onnx pvrecorder numpy
+```
+
+---
+
+## Step 3.5: Download Wake Word Model (sherpa-onnx)
+Sopno uses a local, offline `sherpa-onnx` model for wake-word detection. Download and extract it inside the `models/` directory:
+
+```bash
+# Create models directory
+mkdir -p models
+cd models
+
+# Download Zipformer Gigaspeech model
+wget https://github.com/k2-fsa/sherpa-onnx/releases/download/kws-models/sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.gz
+
+# Extract it
+tar -xzf sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.gz
+
+# Remove compressed file
+rm sherpa-onnx-kws-zipformer-gigaspeech-3.3M-2024-01-01.tar.gz
 ```
 
 ---

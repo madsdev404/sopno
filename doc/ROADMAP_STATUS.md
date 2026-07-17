@@ -19,9 +19,10 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **HUD Sync:** Synchronized audio synthesis so both CLI and PyQt5 HUD GUI benefit automatically.
 
 ### 2. Wake Word Detection — **[COMPLETED]**
-* [x] **Local Offline Activation:** Integrated Picovoice Porcupine to run ultra-lightweight, offline wake-word processing (e.g. `computer`, `jarvis`, `porcupine`).
-* [x] **Config Integration:** Automatically loads Picovoice settings and keyword mappings directly from `config.json`.
-* [x] **Smart Fallback:** Implemented a continuous, auto-calibrating SpeechRecognition/Google STT wake-word listener if no Picovoice key is supplied, ensuring 100% out-of-the-box operation.
+* [x] **Local Offline Activation:** Integrated `sherpa-onnx` Keyword Spotter with a pre-trained Gigaspeech Zipformer model to run lightweight, offline wake-word processing for custom keywords.
+* [x] **Dynamic Config Integration:** Automatically loads custom wake words from `config.json`, tokenizes them dynamically using the model's vocabulary, and applies boosting scores at runtime.
+* [x] **No Keys Required:** Completely free, open-source, and local, eliminating the need for Picovoice API access keys or cloud accounts.
+* [x] **Smart Fallback:** Implemented a continuous, auto-calibrating SpeechRecognition/Google STT wake-word listener if `sherpa-onnx` model files are missing, ensuring 100% out-of-the-box operation.
 
 ### 3. Voice Input (Speech-to-Text) — **[COMPLETED]**
 * [x] **Local Offline STT:** Migrated from online Google SpeechRecognition to fully offline, high-speed `faster-whisper`.
@@ -53,4 +54,8 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * **Modified Files:** `sopno.py`, `doc/ROADMAP_STATUS.md`
 * **Added Files:** `test_whisper.py`
 * **Impact:** Fully offline voice recognition with native bilingual support. Eliminates internet latency for voice transcribing.
+
+### [July 17, 2026] — Step 4: Replaced Picovoice with sherpa-onnx KWS
+* **Modified Files:** `gui.py`, `config.json`, `doc/ROADMAP_STATUS.md`
+* **Impact:** Upgraded wake-word detection to a completely free, local, open-source model using `sherpa-onnx`. Removed requirements for Picovoice access keys and commercial licenses, allowing unlimited custom local wake words (e.g., "Sopno", "Dream").
 
