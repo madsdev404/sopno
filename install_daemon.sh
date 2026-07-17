@@ -65,5 +65,3 @@ echo ""
 echo "To stop the service, run:"
 echo "  systemctl --user stop $SERVICE_NAME"
 echo "========================================="
-EOF
-,Description:

@@ -1,4 +1,5 @@
-import sys
+import tools
+from tools import open_app, search_web, get_time, control_volume
 import re
 import concurrent.futures
 import speech_recognition as sr
@@ -210,7 +211,48 @@ def summarize_history(messages):
 # ==============================================================================
 # MAIN VOICE ASSISTANT LOOP
 # ==============================================================================
-def main():
+def dispatch_command(command_text: str) -> bool:
+    """Parse a spoken command and execute a tool.
+    Returns True if a tool was executed (and response spoken), otherwise False.
+    """
+    txt = command_text.lower().strip()
+    # Open app commands
+    if txt.startswith("open ") or txt.startswith("launch "):
+        app_name = txt.split(' ', 1)[1]
+        response = open_app(app_name)
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    # Search web commands
+    if txt.startswith("search ") or txt.startswith("search for ") or txt.startswith("google "):
+        query = txt.split(' ', 1)[1]
+        response = search_web(query)
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    # Time queries
+    if "time" in txt:
+        response = get_time()
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    # Volume controls
+    if "volume up" in txt or "increase volume" in txt:
+        response = control_volume("up")
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    if "volume down" in txt or "decrease volume" in txt:
+        response = control_volume("down")
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    if "mute" in txt:
+        response = control_volume("mute")
+        print(f"Sopno (tool): {response}")
+        speak_text(response)
+        return True
+    return False
     print("=" * 60)
     print("           SOPNO (DREAM) VOICE ASSISTANT          ")
     print("=" * 60)
@@ -266,6 +308,23 @@ def main():
                     continue
                     
             # Recognize text using bilingual parallel recognition
+            try:
+                text = recognize_bilingual(r, audio)
+                print(f"You said: {text}")
+            except sr.UnknownValueError:
+                # Silently ignore noise or un-decodable audio
+                continue
+            except sr.RequestError as e:
+                err_text = "I encountered an issue connecting to the speech service."
+                print(f"Sopno: {err_text} ({e})")
+                speak_text(err_text)
+                continue
+
+            # Try to handle as a tool command first
+            if dispatch_command(text):
+                # If a tool was executed, skip LLM processing for this turn
+                messages.append({"role": "assistant", "content": "[Tool executed]"})
+                continue
             try:
                 text = recognize_bilingual(r, audio)
                 print(f"You said: {text}")
