@@ -1,6 +1,6 @@
 {
   "model_name": "gemma3:4b",
-  "wake_words": ["sopno", "সোপনো", "dream"],
+  "wake_words": ["sopno", "স্বপ্ন", "dream"],
   "voice_lang_bn": "bn",
   "voice_lang_en": "en",
   "pause_threshold": 0.8,

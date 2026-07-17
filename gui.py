@@ -21,7 +21,7 @@ def load_config():
     return {
         "model_name": "gemma3:4b",
         "picovoice_access_key": "",
-        "wake_words": ["sopno", "সোপনো", "dream"],
+        "wake_words": ["sopno", "স্বপ্ন", "dream"],
         "voice_lang_bn": "bn",
         "voice_lang_en": "en"
     }
@@ -127,11 +127,11 @@ class AssistantWorker(QObject):
                             i += 1
                     return " ".join(result_tokens)
                 
-                config_keywords = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
+                config_keywords = self.config.get("wake_words", ["sopno", "স্বপ্ন", "dream"])
                 keywords_to_register = []
                 for kw in config_keywords:
                     kw_clean = kw.lower().strip()
-                    if kw_clean in ["সোপনো", "সোপন"]:
+                    if kw_clean in ["স্বপ্ন", "সোপনো", "সোপন"]:
                         kw_clean = "sopno"
                     kw_clean = re.sub(r'[^a-zA-Z\s]', '', kw_clean)
                     if kw_clean:
@@ -227,8 +227,8 @@ class AssistantWorker(QObject):
                     
                     # Check wake word
                     text_lower = text.lower().strip()
-                    wake_words = self.config.get("wake_words", ["sopno", "সোপনো", "dream"])
-                    triggered = any(ww in text_lower for ww in wake_words) or "sopno" in text_lower or "সোপন" in text_lower
+                    wake_words = self.config.get("wake_words", ["sopno", "স্বপ্ন", "dream"])
+                    triggered = any(ww in text_lower for ww in wake_words) or "sopno" in text_lower or "স্বপ্ন" in text_lower or "সোপন" in text_lower
                 
                 if triggered:
                     self.log_message.emit("Wake word detected!")

@@ -335,7 +335,7 @@ python3 sopno.py
 | What you say | What happens |
 |---|---|
 | Anything in English | Sopno replies in English |
-| যেকোনো বাংলা কথা | সোপনো বাংলায় উত্তর দেয় |
+| যেকোনো বাংলা কথা | স্বপ্ন বাংলায় উত্তর দেয় |
 | "Speak in Bangla" | Forces Bengali response mode |
 | "Speak in English" | Forces English response mode |
 | "exit" / "quit" / "bye" / "বিদায়" | Closes the assistant |
