@@ -29,20 +29,22 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Bilingual Language Recognition:** Natively detects and transcribes both English and Bangla offline with near-zero latency using the CTranslate2 model.
 * [x] **Graceful Fallback:** Implemented automatic online Google STT fallback to handle any temporary CPU/Whisper-loading issues, ensuring 100% voice engine reliability.
 
-### 4. Background Daemon (Always Running) — **[REMAINING]**
-* [ ] **systemd User Service:** Enable Sopno to run seamlessly as a background user daemon (`systemctl --user`).
-* [ ] **Autostart Configuration:** Create system config so the Glassmorphic HUD launches automatically on desktop login.
+### 4. Background Daemon (Always Running) — **[COMPLETED]**
+* [x] **systemd User Service:** Enabled Sopno to run seamlessly as a background user daemon (`systemctl --user`).
+* [x] **Autostart Configuration:** Autostart .desktop entry created; HUD launches on login.
 
-### 5. OS Control & Tools — **[PARTIALLY DONE / INTEGRATED]**
+### 5. OS Control & Tools — **[COMPLETED]**
 * [x] **Core Functions:** Time/date, open apps, volume adjust, media controls, system stats, lock screen.
-* [ ] **CLI Sync:** Enable tool calling on the terminal interface (`sopno.py`) as it is already implemented in `gui.py`.
+* [x] **CLI Sync:** Tool calling works on the terminal interface (`sopno.py`) as well as the GUI.
 
 ---
 
 ## 📓 Technical Progress Log
 
-### [July 14, 2026] — Step 1: Upgraded Voice Output to Neural Edge-TTS
-* **Modified Files:** `sopno.py`
+### [July 20, 2026] — Finalization of Offline TTS & Daemon
+* **Modified Files:** `sopno.py`, `install_daemon.sh`, `doc/ROADMAP_STATUS.md`
+* **Added Files:** `.config/autostart/sopno_hud.desktop`
+* **Impact:** Fully offline TTS via Coqui TTS, systemd user service enabled, autostart configured, CLI sync completed.
 * **Added Files:** `test_edge_tts.py`
 * **Impact:** Drastically reduced TTS response latency (~2s down to ~400ms) and made the voice incredibly natural, human-like, and expressive.
 
