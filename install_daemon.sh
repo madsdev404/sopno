@@ -8,7 +8,7 @@ USER_SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$USER_SERVICE_DIR/$SERVICE_NAME.service"
 PROJECT_DIR="$(pwd)"
 VENV_PYTHON="$PROJECT_DIR/venv/bin/python3"
-SCRIPT_PATH="$PROJECT_DIR/gui.py"
+SCRIPT_PATH="${PROJECT_DIR}/sopno.py"
 
 echo "========================================="
 echo "   SOPNO SYSTEMD USER SERVICE INSTALLER  "

@@ -8,6 +8,7 @@ import os
 import subprocess
 import ollama
 import asyncio
+import sys
 import edge_tts
 
 # ==============================================================================
@@ -32,40 +33,43 @@ MAX_HISTORY_LENGTH = 13
 # ==============================================================================
 def speak_text(text):
     """
-    Intelligently detects the language of the response and vocalizes it
-    using Microsoft Edge Neural TTS played via system ffplay, with a fallback to gTTS.
+    Offline neural speech synthesis using Coqui TTS (the open‑source Mozilla‑TTS repository).
+    Detects Bangla characters to keep language‑switch logic, but the multilingual model
+    handles both languages automatically.
     """
+    # Detect Bangla characters – used only for optional language handling
     is_bn = bool(re.search(r'[\u0980-\u09FF]', text))
-    # Using natural neural voices: Nabanita (Bengali Female) or Aria (English Female)
-    voice = "bn-BD-NabanitaNeural" if is_bn else "en-US-AriaNeural"
-    
-    temp_file = "temp_speech.mp3"
-    
-    async def generate_speech():
-        communicate = edge_tts.Communicate(text, voice)
-        await communicate.save(temp_file)
-        
+
+    # Lazy‑load a global TTS engine so the model is loaded only once
+    global _tts_engine
+    if "_tts_engine" not in globals():
+        # Choose a multilingual model that includes English and Bangla.
+        # The first run will download the model (~200 MB) to ~/.local/share/tts/.
+        _tts_engine = TTS(
+            model_name="tts_models/multilingual/multi-dataset/your_tts",
+            progress_bar=False,
+            gpu=False,
+        )
+
+    # Synthesize to a temporary WAV file (ffplay expects a file)
+    temp_file = "temp_speech.wav"
+    _tts_engine.tts_to_file(text=text, file_path=temp_file)
+
+    # Play the audio via ffplay (consistent with the rest of the code)
+    subprocess.run([
+        "ffplay",
+        "-nodisp",
+        "-autoexit",
+        "-loglevel",
+        "quiet",
+        temp_file,
+    ])
+
+    # Clean up the temporary file
     try:
-        # Run async generation in a synchronous context
-        asyncio.run(generate_speech())
-        # Play the audio using system ffplay (fully silent and auto-exit)
-        subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_file])
-    except Exception as e:
-        print(f"\n[Warning: Edge TTS failed ({e}). Falling back to Google TTS...]")
-        try:
-            target_lang = "bn" if is_bn else "en"
-            tts = gTTS(text=text, lang=target_lang, slow=False)
-            tts.save(temp_file)
-            subprocess.run(["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", temp_file])
-        except Exception as fallback_err:
-            print(f"[Warning: Google TTS fallback also failed: {fallback_err}]")
-    finally:
-        # Clean up the temporary file
-        if os.path.exists(temp_file):
-            try:
-                os.remove(temp_file)
-            except Exception:
-                pass
+        os.remove(temp_file)
+    except Exception:
+        pass
 
 # ==============================================================================
 # STT BILINGUAL RECOGNIZER
@@ -253,8 +257,8 @@ def dispatch_command(command_text: str) -> bool:
         speak_text(response)
         return True
     return False
-    print("=" * 60)
-    print("           SOPNO (DREAM) VOICE ASSISTANT          ")
+def main():
+
     print("=" * 60)
     print(f"Status:   Initializing Speech engines...")
         

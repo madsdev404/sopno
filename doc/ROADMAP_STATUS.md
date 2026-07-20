@@ -13,9 +13,9 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ## 🛠️ Feature Checklist
 
 ### 1. Voice Output (Text-to-Speech) — **[COMPLETED]**
-* [x] **High-quality Neural Voices:** Upgraded from standard robotic `gTTS` to high-fidelity Microsoft Edge Neural Speech.
-* [x] **Bilingual Language Routing:** Automatically selects `bn-BD-NabanitaNeural` (Bengali Female) or `en-US-AriaNeural` (English Female).
-* [x] **Network Resiliency:** Implemented automatic graceful fallback to Google `gTTS` in case of offline/network failures.
+* [x] **High-quality Neural Voices:** Upgraded from standard robotic `gTTS` to **offline, high-fidelity Coqui TTS** (the open‑source continuation of Mozilla‑TTS).  
+* [x] **Bilingual Language Routing:** Automatically selects the appropriate voice (Bengali or English) from the Coqui model.  
+* [x] **Offline‑first:** No network required; fallback to Google `gTTS` remains optional for rare cases.
 * [x] **HUD Sync:** Synchronized audio synthesis so both CLI and PyQt5 HUD GUI benefit automatically.
 
 ### 2. Wake Word Detection — **[COMPLETED]**
