@@ -1,0 +1,215 @@
+# 🏗️ Sopno — Architecture & Folder Structure
+
+> **Design Philosophy:** *Modular Monolith* — one repo, zero confusion.  
+> Every folder has **one job**. Anyone reading the code instantly knows **what** a file does,  
+> **why** it exists, and **where** to add something new.
+
+---
+
+## 📋 Why We Are Restructuring
+
+The original project kept all logic in a single flat file (`sopno.py` with 432 lines).
+This worked as a prototype, but causes real problems as the project grows:
+
+| Problem (Old) | Solution (New) |
+|---|---|
+| TTS, STT, LLM, tools all in one file | Each concern lives in its own module |
+| Hard to swap TTS/STT engine | Every engine is isolated behind a clean interface |
+| Test files scattered at root | All tests in `tests/` |
+| Prompts buried inside code strings | Plain text files in `prompts/` |
+| Config values hardcoded | Loaded from `config.json` via a Settings class |
+| Scripts mixed with source code | Moved to `scripts/` |
+
+---
+
+## 📁 Full Folder Structure
+
+```text
+sopno/
+│
+├── 📄 main.py                          ← START HERE. Boots the entire assistant.
+├── 📄 requirements.txt                 ← All Python dependencies
+├── 📄 .env                             ← Secrets & local overrides (never commit)
+├── 📄 .env.example                     ← Template showing required env variables
+├── 📄 .gitignore
+├── 📄 README.md                        ← Project overview & quick-start guide
+│
+├── 📁 sopno/                           ← Core application package
+│   ├── 📄 __init__.py
+│   │
+│   ├── 📁 core/                        ← THE BRAIN: orchestrates the pipeline
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 assistant.py             ← Main loop: wakeword → STT → LLM → TTS
+│   │   ├── 📄 context.py               ← Conversation history & memory management
+│   │   └── 📄 dispatcher.py            ← Routes an intent to the right tool
+│   │
+│   ├── 📁 voice/                       ← EVERYTHING AUDIO
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 listener.py              ← Microphone capture & ambient noise calibration
+│   │   ├── 📄 wakeword.py              ← Wake-word engine (sherpa-onnx / fallback)
+│   │   ├── 📄 stt.py                   ← Speech-to-Text (faster-whisper / Google fallback)
+│   │   └── 📄 tts.py                   ← Text-to-Speech (Coqui TTS / gTTS fallback)
+│   │
+│   ├── 📁 llm/                         ← THE AI MODEL LAYER
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 client.py                ← Ollama wrapper: sends prompt, streams reply
+│   │   └── 📄 summarizer.py            ← Compresses long conversation history
+│   │
+│   ├── 📁 tools/                       ← SKILLS: what Sopno can DO
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 registry.py              ← Maps tool names → functions (the dispatcher table)
+│   │   ├── 📄 schema.py                ← JSON schemas for LLM tool-calling API
+│   │   ├── 📄 system.py                ← OS tools: volume, lock screen, app launcher
+│   │   ├── 📄 search.py                ← Web search tool
+│   │   ├── 📄 datetime_tool.py         ← Date/time queries
+│   │   └── 📄 media.py                 ← Media playback controls
+│   │
+│   ├── 📁 ui/                          ← EVERYTHING VISIBLE
+│   │   ├── 📄 __init__.py
+│   │   ├── 📄 hud.py                   ← PyQt5 glassmorphic HUD overlay (was gui.py)
+│   │   └── 📄 cli.py                   ← Terminal-mode interface (no GUI)
+│   │
+│   └── 📁 config/                      ← SETTINGS & PROMPTS
+│       ├── 📄 __init__.py
+│       ├── 📄 settings.py              ← Loads config.json into one Settings object
+│       └── 📄 prompts.py               ← Reads prompt text from prompts/*.txt
+│
+├── 📁 prompts/                         ← PROMPT TEMPLATES (edit without touching code)
+│   ├── 📄 system.txt                   ← Sopno's main personality & rules
+│   └── 📄 summarize.txt                ← Template for history summarization
+│
+├── 📁 models/                          ← Local AI model files (gitignored)
+│   ├── 📁 wakeword/                    ← sherpa-onnx keyword spotter files
+│   └── 📁 whisper/                     ← faster-whisper model cache
+│
+├── 📁 tests/                           ← ALL TESTS (one file per module)
+│   ├── 📄 __init__.py
+│   ├── 📄 test_stt.py
+│   ├── 📄 test_tts.py
+│   ├── 📄 test_tools.py
+│   └── 📄 test_assistant.py
+│
+├── 📁 scripts/                         ← SETUP & DEPLOYMENT
+│   ├── 📄 install_daemon.sh            ← Register sopno as a systemd user service
+│   └── 📄 setup.sh                     ← One-shot: venv + deps + model download
+│
+├── 📁 logs/                            ← Runtime logs (gitignored)
+│   └── 📄 sopno.log
+│
+└── 📁 doc/                             ← DOCUMENTATION
+    ├── 📄 ARCHITECTURE.md              ← This file — living reference
+    ├── 📄 ROADMAP_STATUS.md            ← Feature progress tracker
+    ├── 📄 tts_integration.md           ← TTS deep-dive notes
+    ├── 📄 SOPNO_COMPLETE_GUIDE.md      ← Full user guide
+    └── 📄 01_installation.md           ← Installation instructions
+```
+
+---
+
+## 🔄 Data Flow / Pipeline
+
+```
+User speaks
+    │
+    ▼
+sopno/voice/listener.py        ← Captures mic audio, calibrates for noise
+    │
+    ▼
+sopno/voice/wakeword.py        ← Detects "Sopno" / "Dream" wake word
+    │  (wakeword triggered)
+    ▼
+sopno/voice/stt.py             ← Offline Whisper transcription → text
+    │
+    ▼
+sopno/core/dispatcher.py       ← Is this a TOOL call or a CHAT message?
+    │
+    ├──► sopno/tools/...        ← TOOL: run system command, web search, etc.
+    │         │
+    │         └──► sopno/voice/tts.py  ← Speak the tool result
+    │
+    └──► sopno/llm/client.py   ← CHAT: stream reply from Ollama (gemma3:4b)
+              │
+              ▼
+         sopno/core/context.py ← Save to history; summarize if too long
+              │
+              ▼
+         sopno/voice/tts.py    ← Coqui TTS synthesizes reply → audio
+              │
+              ▼
+         sopno/ui/hud.py       ← Shows text on glassmorphic HUD
+              │
+              ▼
+         🔊 User hears the response
+```
+
+---
+
+## 🧩 One Folder = One Job (Quick Reference)
+
+| Folder | Job | Never put here |
+|--------|-----|----------------|
+| `sopno/core/` | Orchestration & routing | Audio code, LLM API calls |
+| `sopno/voice/` | Mic, wakeword, STT, TTS | Business logic, tool code |
+| `sopno/llm/` | Ollama client, summarizer | Audio, UI, tools |
+| `sopno/tools/` | Skills Sopno can perform | Audio, LLM calls |
+| `sopno/ui/` | HUD overlay, CLI display | Any audio or AI logic |
+| `sopno/config/` | Settings loader | Runtime logic |
+| `prompts/` | Plain-text prompt files | Python code |
+| `tests/` | Tests only | Production code |
+| `scripts/` | Shell setup/deploy scripts | Python source |
+
+---
+
+## ♻️ Swap Any Piece Without Breaking the Rest
+
+```
+Want to change TTS engine?      → Only edit  sopno/voice/tts.py
+Want to change LLM model?       → Only edit  sopno/llm/client.py
+Want to add a new skill?        → Only add   sopno/tools/your_tool.py
+                                   and register it in sopno/tools/registry.py
+Want to change Sopno's persona? → Only edit  prompts/system.txt
+Want to change UI layout?       → Only edit  sopno/ui/hud.py
+```
+
+---
+
+## 📦 Migration Map (Old → New)
+
+| Old file | New location |
+|---|---|
+| `sopno.py` | `sopno/core/assistant.py` + `sopno/core/dispatcher.py` + `main.py` |
+| `gui.py` | `sopno/ui/hud.py` |
+| `tools.py` | `sopno/tools/system.py` + `sopno/tools/search.py` + `sopno/tools/datetime_tool.py` |
+| `tools_schema.py` | `sopno/tools/schema.py` |
+| `config.json` | root `config.json` (read via `sopno/config/settings.py`) |
+| `test_*.py` (root) | `tests/test_*.py` |
+| `install_daemon.sh` | `scripts/install_daemon.sh` |
+
+---
+
+## 🚀 Implementation Phases
+
+| Phase | What | Status |
+|-------|------|--------|
+| **1** | Create folder skeleton + `__init__.py` files | ⏳ In progress |
+| **2** | `sopno/config/settings.py` — centralized config | ⏳ |
+| **3** | `prompts/system.txt` + `prompts/summarize.txt` | ⏳ |
+| **4** | `sopno/voice/tts.py` — offline TTS with fallback | ⏳ |
+| **5** | `sopno/voice/stt.py` — Whisper STT with fallback | ⏳ |
+| **6** | `sopno/voice/listener.py` — mic capture | ⏳ |
+| **7** | `sopno/llm/client.py` + `sopno/llm/summarizer.py` | ⏳ |
+| **8** | `sopno/tools/` — all tools + registry + schema | ⏳ |
+| **9** | `sopno/core/dispatcher.py` + `sopno/core/context.py` | ⏳ |
+| **10** | `sopno/core/assistant.py` — main loop | ⏳ |
+| **11** | `main.py` — clean entry point | ⏳ |
+| **12** | `sopno/ui/hud.py` — move gui.py | ⏳ |
+| **13** | `tests/` — move & update test files | ⏳ |
+| **14** | `scripts/` — move shell scripts | ⏳ |
+| **15** | `requirements.txt` — generate from venv | ⏳ |
+| **16** | Git commit & push final structure | ⏳ |
+
+---
+
+*Document created: July 21, 2026*  
+*Last updated: July 21, 2026*  
+*Author: Antigravity AI coding assistant*
