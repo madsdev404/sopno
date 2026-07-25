@@ -3,19 +3,19 @@ sopno/voice/vad.py
 ━━━━━━━━━━━━━━━━━
 Offline Voice Activity Detection (turn-taking) for natural conversation.
 
-Uses Silero VAD via sherpa-onnx (already a project dependency) to detect
-when the user starts and finishes speaking — closer to human turn-taking
-than fixed timeouts.
-
-Falls back to SpeechRecognition listen() if the VAD model is unavailable.
+Uses Silero VAD via sherpa-onnx to detect when the user starts and finishes
+speaking. Captures at the mic's native sample rate (often 44100), then
+resamples to 16 kHz — opening the mic as 16 kHz on a 44.1 kHz device
+corrupts audio and makes Whisper invent garbage Bangla.
 """
 
 from __future__ import annotations
 
+import audioop
 import time
 import urllib.request
 from pathlib import Path
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import numpy as np
 import speech_recognition as sr
@@ -24,9 +24,7 @@ from sopno.config.settings import settings
 
 _SAMPLE_RATE = 16000
 _SILERO_URLS = (
-    # Official sherpa-onnx release asset
     "https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/silero_vad.onnx",
-    # Upstream Silero package data (fallback)
     "https://github.com/snakers4/silero-vad/raw/master/src/silero_vad/data/silero_vad.onnx",
 )
 
@@ -58,6 +56,42 @@ def _float_to_audio_data(samples: np.ndarray, sample_rate: int = _SAMPLE_RATE) -
     return sr.AudioData(pcm.tobytes(), sample_rate, 2)
 
 
+def _open_mic_stream(pa) -> Tuple[object, int]:
+    """
+    Open the default input at a rate the hardware actually supports.
+    Returns (stream, capture_rate).
+    """
+    import pyaudio
+
+    info = pa.get_default_input_device_info()
+    device_index = int(info["index"])
+    native = int(info.get("defaultSampleRate") or 44100)
+
+    # Prefer native rate — forcing 16000 on a 44100 device garbles speech
+    for rate in (native, 44100, 48000, 16000):
+        try:
+            stream = pa.open(
+                format=pyaudio.paInt16,
+                channels=1,
+                rate=rate,
+                input=True,
+                input_device_index=device_index,
+                frames_per_buffer=1024,
+            )
+            return stream, rate
+        except Exception:
+            continue
+    raise RuntimeError("Could not open microphone input stream.")
+
+
+def _to_16k_float(pcm16: bytes, in_rate: int, resample_state) -> Tuple[np.ndarray, object]:
+    """Resample int16 PCM to 16 kHz float32 mono in [-1, 1]."""
+    if in_rate != _SAMPLE_RATE:
+        pcm16, resample_state = audioop.ratecv(pcm16, 2, 1, in_rate, _SAMPLE_RATE, resample_state)
+    samples = np.frombuffer(pcm16, dtype=np.int16).astype(np.float32) / 32768.0
+    return samples, resample_state
+
+
 class TurnTaker:
     """
     Capture one complete user utterance using offline Silero VAD.
@@ -87,11 +121,10 @@ class TurnTaker:
 
             config = sherpa_onnx.VadModelConfig()
             config.silero_vad.model = str(model_path)
-            config.silero_vad.threshold = 0.5
-            # End turn shortly after the user stops (natural pause)
-            config.silero_vad.min_silence_duration = 0.55
-            config.silero_vad.min_speech_duration = 0.2
-            config.silero_vad.max_speech_duration = 12.0
+            config.silero_vad.threshold = 0.45
+            config.silero_vad.min_silence_duration = 0.85
+            config.silero_vad.min_speech_duration = 0.25
+            config.silero_vad.max_speech_duration = 15.0
             config.sample_rate = _SAMPLE_RATE
 
             self._window_size = int(config.silero_vad.window_size)
@@ -114,13 +147,7 @@ class TurnTaker:
         max_utterance_s: float = 12.0,
     ) -> Optional[sr.AudioData]:
         """
-        Wait for the user to speak, then return one full utterance.
-
-        Args:
-            running_check: return False to abort
-            on_speech_start: fired once when VAD first detects speech
-            max_wait_s: how long to wait for speech to begin (0 = forever)
-            max_utterance_s: hard cap on utterance length
+        Wait for the user to speak, then return one full utterance at 16 kHz.
         """
         if not self._available or self._vad is None:
             return None
@@ -139,31 +166,38 @@ class TurnTaker:
         started_at = time.time()
         speech_started_at = 0.0
         leftover = np.array([], dtype=np.float32)
+        resample_state = None
+        # ~250ms pre-roll at 16 kHz
+        pre_roll_max = int(0.25 * _SAMPLE_RATE)
+        pre_roll = np.array([], dtype=np.float32)
 
-        # Reset VAD internal state between turns
         try:
             self._vad.reset()
         except Exception:
-            # Older sherpa builds may not expose reset — recreate is heavy; ignore
             pass
 
         try:
-            stream = pa.open(
-                format=pyaudio.paFloat32,
-                channels=1,
-                rate=_SAMPLE_RATE,
-                input=True,
-                frames_per_buffer=max(self._window_size, 1024),
-            )
+            stream, capture_rate = _open_mic_stream(pa)
+            self.log(f"Mic capture @ {capture_rate} Hz → resample → {_SAMPLE_RATE} Hz for VAD/STT.")
+
+            # Read enough int16 frames so that after resample we keep up with VAD windows
+            # 1024 @ 44100 ≈ 370 samples @ 16k; read multiple chunks as needed
+            read_frames = 1024
 
             while is_running():
-                raw = stream.read(self._window_size, exception_on_overflow=False)
-                chunk = np.frombuffer(raw, dtype=np.float32)
-                leftover = np.concatenate([leftover, chunk])
+                raw = stream.read(read_frames, exception_on_overflow=False)
+                chunk_f, resample_state = _to_16k_float(raw, capture_rate, resample_state)
+                leftover = np.concatenate([leftover, chunk_f])
 
                 while len(leftover) >= self._window_size:
                     window = leftover[: self._window_size]
                     leftover = leftover[self._window_size :]
+
+                    if not speech_started:
+                        pre_roll = np.concatenate([pre_roll, window])
+                        if len(pre_roll) > pre_roll_max:
+                            pre_roll = pre_roll[-pre_roll_max:]
+
                     self._vad.accept_waveform(window)
 
                     if not speech_started:
@@ -177,14 +211,22 @@ class TurnTaker:
                         except Exception:
                             pass
 
-                # Completed speech segment(s)
                 while not self._vad.empty():
                     seg = self._vad.front.samples
                     self._vad.pop()
-                    if seg is None or len(seg) < int(0.2 * _SAMPLE_RATE):
+                    if seg is None or len(seg) < int(0.25 * _SAMPLE_RATE):
                         continue
-                    audio = _float_to_audio_data(np.asarray(seg, dtype=np.float32))
-                    self.log(f"Turn captured ({len(seg) / _SAMPLE_RATE:.1f}s).")
+                    samples = np.asarray(seg, dtype=np.float32)
+                    if len(pre_roll):
+                        # Prepend only a short lead-in (VAD segment usually already has onset)
+                        lead = pre_roll[-int(0.15 * _SAMPLE_RATE) :]
+                        samples = np.concatenate([lead, samples])
+                    # Soft peak normalize — helps Whisper without clipping
+                    peak = float(np.max(np.abs(samples))) if len(samples) else 0.0
+                    if peak > 1e-3:
+                        samples = samples * min(0.95 / peak, 3.0)
+                    audio = _float_to_audio_data(samples)
+                    self.log(f"Turn captured ({len(samples) / _SAMPLE_RATE:.1f}s).")
                     return audio
 
                 now = time.time()
@@ -194,7 +236,6 @@ class TurnTaker:
 
                 if speech_started and (now - speech_started_at) >= max_utterance_s:
                     self.log("Utterance hit max length — finalizing.")
-                    # Force flush if possible
                     try:
                         self._vad.flush()
                     except Exception:
@@ -202,7 +243,7 @@ class TurnTaker:
                     while not self._vad.empty():
                         seg = self._vad.front.samples
                         self._vad.pop()
-                        if seg is not None and len(seg) >= int(0.2 * _SAMPLE_RATE):
+                        if seg is not None and len(seg) >= int(0.25 * _SAMPLE_RATE):
                             return _float_to_audio_data(np.asarray(seg, dtype=np.float32))
                     return None
 

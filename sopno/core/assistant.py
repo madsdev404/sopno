@@ -175,11 +175,27 @@ class SopnoAssistant:
 
             self.on_log_message("Transcribing speech…")
             try:
-                cmd_text = transcribe(self.listener.recognizer, audio)
+                # Config lock wins; else only force Bangla after an explicit language switch.
+                # Do NOT lock to default context "en" — that breaks Bangla recognition.
+                if settings.stt_language and settings.stt_language != "auto":
+                    lang_hint = settings.stt_language
+                elif self.context.current_language == "bn":
+                    lang_hint = "bn"
+                else:
+                    lang_hint = None
+
+                cmd_text = transcribe(
+                    self.listener.recognizer,
+                    audio,
+                    language=lang_hint,
+                )
                 cmd_text = (cmd_text or "").strip()
                 if not cmd_text:
                     self.on_log_message("Empty transcript — staying quiet.")
                     continue
+                # Match reply language to what was actually spoken
+                if re.search(r"[\u0980-\u09FF]", cmd_text):
+                    self.context.current_language = "bn"
                 self.on_log_message(f"User: '{cmd_text}'")
                 self.on_speech_detected(cmd_text)
                 return cmd_text
