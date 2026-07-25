@@ -1,5 +1,9 @@
 {
   "model_name": "qwen3:8b",
+  "llm_think": false,
+  "llm_num_predict": 120,
+  "llm_num_ctx": 2048,
+  "llm_temperature": 0.6,
   "wake_words": ["sopno", "স্বপ্ন", "dream"],
   "voice_lang_bn": "bn",
   "voice_lang_en": "en",

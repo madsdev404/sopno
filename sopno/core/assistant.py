@@ -3,10 +3,9 @@ sopno/core/assistant.py
 ━━━━━━━━━━━━━━━━━━━━━━━
 Main pipeline orchestrator.
 
-Defines the SopnoAssistant class, which runs the continuous listening loop:
-  Standby (wake-word) → Listening (command capture) → Thinking (LLM/dispatcher) → Speaking (TTS reply).
-Uses a callback-driven design so it can run seamlessly in headless CLI mode
-or within a glassmorphic PyQt5 HUD.
+Defines the SopnoAssistant class, which runs the continuous conversation loop:
+  Intro (TTS) → Listening (idle VAD) → Thinking → Speaking → Listening again.
+Uses offline Silero VAD for natural turn-taking; stays quiet until the user speaks.
 """
 
 from __future__ import annotations
@@ -17,17 +16,33 @@ import time
 from typing import Callable, Optional
 
 import speech_recognition as sr
-import ollama
 
 from sopno.config.settings import settings
 from sopno.core.context import ConversationContext
 from sopno.core.dispatcher import CommandDispatcher
+from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.tools.schema import TOOLS_SCHEMA
 from sopno.tools.registry import execute_tool
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
-from sopno.voice.wakeword import WakeWordDetector
+
+# Only attach the heavy tool schema when the utterance looks action-oriented.
+# Pure chat without tools is much faster on CPU (seconds vs tens of seconds).
+_TOOLISH = re.compile(
+    r"\b("
+    r"open|launch|start|close|search|google|volume|mute|unmute|"
+    r"play|pause|resume|next|previous|skip|"
+    r"time|date|clock|battery|cpu|ram|memory|stats|status|system|"
+    r"media|music|song|spotify|browser|chrome|firefox|vscode|terminal|"
+    r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ"
+    r")\b",
+    re.IGNORECASE,
+)
+
+
+# Brief pause after TTS so the mic does not hear Sopno's own voice as a turn.
+_POST_SPEAK_SETTLE_S = 0.45
 
 
 class SopnoAssistant:
@@ -49,8 +64,7 @@ class SopnoAssistant:
         self.running = True
         self.context = ConversationContext()
         self.dispatcher = CommandDispatcher()
-        self.listener = Listener()
-        self.wakeword_detector = WakeWordDetector(log_callback=self.on_log_message)
+        self.listener = Listener(log_callback=self.on_log_message)
 
         # voice = mic + TTS; text = typed input + silent replies
         self.interaction_mode = "voice"
@@ -75,7 +89,8 @@ class SopnoAssistant:
         self._pending_text = None
         self._text_event.set()  # unblock whichever wait is active
         self.on_log_message(f"Mode → {mode}")
-        self.on_status_changed("standby")
+        # Voice resumes idle listening; text sits quiet until typed input
+        self.on_status_changed("listening" if mode == "voice" else "standby")
 
     def submit_text(self, text: str) -> None:
         """Queue a typed message (text mode)."""
@@ -97,6 +112,7 @@ class SopnoAssistant:
         if self.interaction_mode == "voice":
             self.on_status_changed(status)
             speak(text)
+            time.sleep(_POST_SPEAK_SETTLE_S)
         else:
             # Text mode: brief "speaking" flash for avatar, no TTS
             self.on_status_changed(status)
@@ -105,7 +121,7 @@ class SopnoAssistant:
     def _await_command(self) -> Optional[str]:
         """
         Block until we have a user command.
-        Voice: wake word → mic capture → STT.
+        Voice: idle listen (VAD) → capture turn → STT. Stays quiet until speech.
         Text: wait for submit_text().
         """
         while self.running:
@@ -129,39 +145,47 @@ class SopnoAssistant:
                             return text
                 continue
 
-            # ── Voice path ────────────────────────────────────────────────────
-            self.on_status_changed("standby")
-            triggered = self.wakeword_detector.wait_for_wakeword(
-                recognizer=self.listener.recognizer,
-                running_check=self._voice_active,
-            )
+            # ── Voice path: continuous conversation (no wake-word gate) ───────
+            self.on_status_changed("listening")
+            self.on_log_message("Listening… say something when you're ready.")
+
+            def _on_speech_start() -> None:
+                self.on_log_message("Speech detected — capturing turn…")
+                self.on_status_changed("listening")
+
+            try:
+                audio = self.listener.listen_for_turn(
+                    running_check=self._voice_active,
+                    on_speech_start=_on_speech_start,
+                    max_wait_s=0.0,  # wait forever while idle-listening
+                    max_utterance_s=12.0,
+                )
+            except Exception as e:
+                self.on_log_message(f"Microphone capturing failed: {e}")
+                time.sleep(0.3)
+                continue
+
             if not self.running:
                 return None
             if self.interaction_mode != "voice":
                 continue
-            if not triggered:
-                continue
-
-            self.on_log_message("Wake word detected! Listening for command…")
-            self.on_status_changed("listening")
-
-            try:
-                audio = self.listener.listen(phrase_time_limit=10)
-            except Exception as e:
-                self.on_log_message(f"Microphone capturing failed: {e}")
-                continue
-
-            if self.interaction_mode != "voice" or not self.running:
+            if audio is None:
+                # Aborted (mode switch / stop) or empty — keep listening quietly
                 continue
 
             self.on_log_message("Transcribing speech…")
             try:
                 cmd_text = transcribe(self.listener.recognizer, audio)
-                self.on_log_message(f"User command: '{cmd_text}'")
+                cmd_text = (cmd_text or "").strip()
+                if not cmd_text:
+                    self.on_log_message("Empty transcript — staying quiet.")
+                    continue
+                self.on_log_message(f"User: '{cmd_text}'")
                 self.on_speech_detected(cmd_text)
                 return cmd_text
             except sr.UnknownValueError:
-                self.on_log_message("Could not understand audio.")
+                # Noise / cough / unclear — do not invent an answer
+                self.on_log_message("Could not understand audio — still listening.")
                 continue
             except Exception as e:
                 self.on_log_message(f"STT Error: {e}")
@@ -221,27 +245,35 @@ class SopnoAssistant:
             self.context.add_assistant_message(tool_output)
             return True
 
-        # D. LLM Processing with dynamic tool-calling fallback
-        self.on_log_message("Querying Ollama with tool calling schema…")
+        # D. LLM Processing — tools only when the phrase looks action-oriented
+        use_tools = bool(_TOOLISH.search(cmd_text))
+        if use_tools:
+            self.on_log_message("Querying Ollama with tools…")
+        else:
+            self.on_log_message("Querying Ollama (fast chat, no tools)…")
+
         self.context.add_user_message(cmd_text)
         chat_messages = self.context.get_messages_for_llm()
 
         try:
-            response = ollama.chat(
-                model=settings.model_name,
-                messages=chat_messages,
-                tools=TOOLS_SCHEMA,
+            response = llm_chat(
+                chat_messages,
+                tools=TOOLS_SCHEMA if use_tools else None,
             )
 
-            response_msg = response.get("message", {})
-            tool_calls = response_msg.get("tool_calls", [])
+            response_msg = message_as_dict(response["message"])
+            tool_calls = response_msg.get("tool_calls") or []
 
             if tool_calls:
                 chat_messages.append(response_msg)
 
                 for tool in tool_calls:
-                    name = tool["function"]["name"]
-                    args = tool["function"]["arguments"]
+                    # Ollama may return dicts or objects
+                    fn = tool["function"] if isinstance(tool, dict) else tool.function
+                    name = fn["name"] if isinstance(fn, dict) else fn.name
+                    args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+                    if not isinstance(args, dict):
+                        args = {}
                     self.on_log_message(f"LLM request tool: '{name}' with args {args}")
 
                     tool_result = execute_tool(name, args)
@@ -253,16 +285,17 @@ class SopnoAssistant:
                     })
 
                 self.on_log_message("Requesting conversational response from Ollama…")
-                final_response = ollama.chat(
-                    model=settings.model_name,
-                    messages=chat_messages,
-                )
-                assistant_reply = final_response["message"]["content"]
+                final_response = llm_chat(chat_messages)
+                final_msg = message_as_dict(final_response["message"])
+                assistant_reply = final_msg.get("content", "")
             else:
                 assistant_reply = response_msg.get("content", "")
 
-            assistant_reply_clean = re.sub(r"[*_`#\-]", " ", assistant_reply)
+            assistant_reply_clean = re.sub(r"[*_`#\-]", " ", assistant_reply or "")
             assistant_reply_clean = re.sub(r"\s+", " ", assistant_reply_clean).strip()
+
+            if not assistant_reply_clean:
+                assistant_reply_clean = "Sorry, I didn't catch that. Could you say it again?"
 
             self._deliver_reply(assistant_reply_clean)
             self.context.add_assistant_message(assistant_reply_clean)
@@ -277,18 +310,18 @@ class SopnoAssistant:
         return True
 
     def run(self) -> None:
-        """Boots the sound system and starts the continuous listening loop."""
+        """Intro → idle listen → answer only when the user speaks."""
         self.on_log_message("Initializing sound system…")
 
         self.listener.calibrate()
-        self.on_log_message("Sound system initialized successfully!")
+        vad_note = "Silero VAD" if self.listener.turn_taker.available else "classic listen"
+        self.on_log_message(f"Sound system ready ({vad_note} turn-taking).")
 
-        welcome_text = "Hello! Sopno voice assistant is ready."
+        welcome_text = "Hello! I'm Sopno. I'm listening whenever you're ready."
         self._deliver_reply(welcome_text)
-        self.on_status_changed("standby")
+        self.on_status_changed("listening")
 
         self.on_log_message(f"Using LLM Model: {settings.model_name}")
-        self.on_log_message(f"Wake words configured: {settings.wake_words}")
 
         while self.running:
             try:

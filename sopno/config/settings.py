@@ -28,6 +28,11 @@ class Settings:
 
         # ── LLM ──────────────────────────────────────────────
         self.model_name: str        = data.get("model_name", "qwen3:8b")
+        # Qwen3 "thinking" burns 30–90s on CPU for short voice replies — keep off
+        self.llm_think: bool        = bool(data.get("llm_think", False))
+        self.llm_num_predict: int   = int(data.get("llm_num_predict", 120))
+        self.llm_num_ctx: int       = int(data.get("llm_num_ctx", 2048))
+        self.llm_temperature: float = float(data.get("llm_temperature", 0.6))
 
         # ── Wake-word ─────────────────────────────────────────
         self.wake_words: list       = data.get("wake_words", ["sopno", "dream"])

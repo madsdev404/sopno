@@ -416,8 +416,8 @@ class SopnoHUDWindow(QMainWindow):
         self.old_pos = None
         self.is_compact = False
         self.interaction_mode = "voice"
-        self.current_status = "standby"
-        self._wake_hint = self._build_wake_hint()
+        self.current_status = "listening"
+        self._listen_hint = "Listening… say something"
 
         self.init_ui()
         self.init_tray()
@@ -429,12 +429,6 @@ class SopnoHUDWindow(QMainWindow):
         self.worker.reply_generated.connect(self.update_sopno_reply)
         self.worker.log_message.connect(self.update_log)
         self.thread.start()
-
-    @staticmethod
-    def _build_wake_hint() -> str:
-        words = [w for w in settings.wake_words if w and not w.startswith("স")]
-        primary = words[0] if words else "sopno"
-        return f'Say “{primary.title()}”'
 
     def init_ui(self) -> None:
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -466,7 +460,7 @@ class SopnoHUDWindow(QMainWindow):
         header.setContentsMargins(2, 0, 0, 0)
         header.setSpacing(8)
 
-        self.context_label = QLabel(self._wake_hint)
+        self.context_label = QLabel(self._listen_hint)
         self.context_label.setFont(QFont("IBM Plex Sans", 9))
         self.context_label.setStyleSheet("color: #6B7C94; background: transparent;")
         self.context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
@@ -734,8 +728,8 @@ class SopnoHUDWindow(QMainWindow):
             self.context_label.setText("Type a message")
             self.text_input.setFocus()
         else:
-            if self.current_status == "standby":
-                self.context_label.setText(self._wake_hint)
+            if self.current_status in ("standby", "listening"):
+                self.context_label.setText(self._listen_hint)
 
     def toggle_interaction_mode(self) -> None:
         next_mode = "text" if self.interaction_mode == "voice" else "voice"
@@ -876,13 +870,13 @@ class SopnoHUDWindow(QMainWindow):
         if self.interaction_mode == "text":
             return
         hints = {
-            "standby": self._wake_hint,
-            "listening": "Listening…",
+            "standby": self._listen_hint,
+            "listening": self._listen_hint,
             "thinking": "Thinking…",
             "speaking": "Speaking…",
             "error": "Something went wrong",
         }
-        self.context_label.setText(hints.get(self.current_status, self._wake_hint))
+        self.context_label.setText(hints.get(self.current_status, self._listen_hint))
 
     def update_user_speech(self, text: str) -> None:
         self.speech_display.setText(text)

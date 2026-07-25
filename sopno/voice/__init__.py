@@ -1,1 +1,1 @@
-# voice — everything audio (listener, wakeword, STT, TTS)
+# voice — everything audio (listener, VAD turn-taking, wakeword, STT, TTS)
