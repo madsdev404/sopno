@@ -191,22 +191,22 @@ Want to change UI layout?       → Only edit  sopno/ui/hud.py
 
 | Phase | What | Status |
 |-------|------|--------|
-| **1** | Create folder skeleton + `__init__.py` files | ⏳ In progress |
-| **2** | `sopno/config/settings.py` — centralized config | ⏳ |
-| **3** | `prompts/system.txt` + `prompts/summarize.txt` | ⏳ |
-| **4** | `sopno/voice/tts.py` — offline TTS with fallback | ⏳ |
-| **5** | `sopno/voice/stt.py` — Whisper STT with fallback | ⏳ |
-| **6** | `sopno/voice/listener.py` — mic capture | ⏳ |
-| **7** | `sopno/llm/client.py` + `sopno/llm/summarizer.py` | ⏳ |
-| **8** | `sopno/tools/` — all tools + registry + schema | ⏳ |
-| **9** | `sopno/core/dispatcher.py` + `sopno/core/context.py` | ⏳ |
-| **10** | `sopno/core/assistant.py` — main loop | ⏳ |
-| **11** | `main.py` — clean entry point | ⏳ |
-| **12** | `sopno/ui/hud.py` — move gui.py | ⏳ |
-| **13** | `tests/` — move & update test files | ⏳ |
-| **14** | `scripts/` — move shell scripts | ⏳ |
-| **15** | `requirements.txt` — generate from venv | ⏳ |
-| **16** | Git commit & push final structure | ⏳ |
+| **1** | Create folder skeleton + `__init__.py` files | ✅ Completed |
+| **2** | `sopno/config/settings.py` — centralized config | ✅ Completed |
+| **3** | `prompts/system.txt` + `prompts/summarize.txt` | ✅ Completed |
+| **4** | `sopno/voice/tts.py` — offline TTS with fallback | ✅ Completed |
+| **5** | `sopno/voice/stt.py` — Whisper STT with fallback | ✅ Completed |
+| **6** | `sopno/voice/listener.py` — mic capture | ✅ Completed |
+| **7** | `sopno/llm/client.py` + `sopno/llm/summarizer.py` | ✅ Completed |
+| **8** | `sopno/tools/` — all tools + registry + schema | ✅ Completed |
+| **9** | `sopno/core/dispatcher.py` + `sopno/core/context.py` | ✅ Completed |
+| **10** | `sopno/core/assistant.py` — main loop | ✅ Completed |
+| **11** | `main.py` — clean entry point | ✅ Completed |
+| **12** | `sopno/ui/hud.py` — move gui.py | ✅ Completed |
+| **13** | `tests/` — move & update test files | ✅ Completed |
+| **14** | `scripts/` — move shell scripts | ✅ Completed |
+| **15** | `requirements.txt` — generate from venv | ✅ Completed |
+| **16** | Git commit & push final structure | ✅ Completed |
 
 ---
 
