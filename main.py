@@ -8,9 +8,10 @@ or the terminal console-based CLI. If HUD dependencies are missing, it falls
 back gracefully to the CLI mode.
 
 Usage:
-    python main.py          # Launches HUD mode (falls back to CLI if PyQt5 is missing)
-    python main.py --hud    # Launches HUD mode explicitly
-    python main.py --cli    # Launches terminal CLI mode explicitly
+    python main.py              # Launches HUD mode (falls back to CLI if PyQt5 is missing)
+    python main.py --hud        # Launches HUD mode explicitly
+    python main.py --hud --reload  # HUD with auto-restart on UI file changes
+    python main.py --cli        # Launches terminal CLI mode explicitly
 """
 
 import argparse
@@ -20,7 +21,7 @@ import sys
 def main() -> None:
     """Boot orchestrator for Sopno."""
     parser = argparse.ArgumentParser(description="🌙 Sopno Voice Assistant")
-    
+
     mode_group = parser.add_mutually_exclusive_group()
     mode_group.add_argument(
         "--hud",
@@ -32,8 +33,16 @@ def main() -> None:
         action="store_true",
         help="Launch in terminal CLI console mode"
     )
+    parser.add_argument(
+        "--reload",
+        action="store_true",
+        help="Auto-restart HUD when UI source files change (dev mode)"
+    )
 
     args = parser.parse_args()
+
+    if args.reload and args.cli:
+        parser.error("--reload only applies to HUD mode")
 
     # Route execution based on flags
     if args.cli:
@@ -42,7 +51,7 @@ def main() -> None:
     elif args.hud:
         try:
             from sopno.ui.hud import run_hud
-            run_hud()
+            run_hud(reload=args.reload)
         except ImportError as e:
             print(f"[Warning] HUD mode failed to load dependencies ({e}).")
             print("Falling back to terminal CLI mode...\n")
@@ -52,7 +61,7 @@ def main() -> None:
         # Default behavior: try HUD first, fallback to CLI
         try:
             from sopno.ui.hud import run_hud
-            run_hud()
+            run_hud(reload=args.reload)
         except ImportError:
             from sopno.ui.cli import run_cli
             run_cli()
