@@ -119,3 +119,6 @@ test_bn.mp3
 
 # Machine learning models
 models/
+
+# Application logs
+logs/

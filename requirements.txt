@@ -1,0 +1,22 @@
+# Core Ollama integration
+ollama
+
+# Voice Synthesis (TTS)
+gTTS
+edge-tts
+
+# Speech Recognition & Transcription (STT)
+SpeechRecognition
+faster-whisper
+pyaudio
+
+# Wake-word Spotting (KWS)
+sherpa-onnx
+pvrecorder
+numpy
+
+# GUI Dashboard & Overlays
+PyQt5
+
+# System & Diagnostics skills
+psutil

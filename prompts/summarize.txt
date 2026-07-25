@@ -1,0 +1,5 @@
+Summarize the following conversation history in 2-3 concise sentences.
+Preserve all key facts, user preferences, names, topics discussed, and any decisions made.
+The summary will be used to keep context in a voice assistant — be precise and factual.
+
+Conversation to summarize:
