@@ -7,7 +7,7 @@ as typed attributes on a single `settings` singleton.
 
 Usage anywhere in the project:
     from sopno.config.settings import settings
-    print(settings.model_name)   # → "gemma3:4b"
+    print(settings.model_name)   # → "qwen3:8b"
 """
 
 import json
@@ -27,7 +27,7 @@ class Settings:
             data = json.load(f)
 
         # ── LLM ──────────────────────────────────────────────
-        self.model_name: str        = data.get("model_name", "gemma3:4b")
+        self.model_name: str        = data.get("model_name", "qwen3:8b")
 
         # ── Wake-word ─────────────────────────────────────────
         self.wake_words: list       = data.get("wake_words", ["sopno", "dream"])

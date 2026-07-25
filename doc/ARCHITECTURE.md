@@ -127,7 +127,7 @@ sopno/core/dispatcher.py       ← Is this a TOOL call or a CHAT message?
     │         │
     │         └──► sopno/voice/tts.py  ← Speak the tool result
     │
-    └──► sopno/llm/client.py   ← CHAT: stream reply from Ollama (gemma3:4b)
+    └──► sopno/llm/client.py   ← CHAT: stream reply from Ollama (qwen3:8b)
               │
               ▼
          sopno/core/context.py ← Save to history; summarize if too long

@@ -59,7 +59,7 @@
 ┌─────────────────────────────────────────────────────┐
 │              🧠 BRAIN — LLM via Ollama              │
 │   Text → Reasoning → Response Text                  │
-│   Model: gemma3:4b (local, private)                 │
+│   Model: qwen3:8b (local, private)                  │
 │   Memory: Dynamic summarization                     │
 └──────────────────────┬──────────────────────────────┘
                        │ Response Text
@@ -93,13 +93,13 @@ sopno/
 
 ```python
 # File: sopno.py — Lines 10–25
-MODEL_NAME = "gemma3:4b"          # Which Ollama model to use
+MODEL_NAME = "qwen3:8b"           # Which Ollama model to use
 MAX_HISTORY_LENGTH = 13           # Max messages before memory compression
                                   # = 1 system prompt + 6 full turns
 ```
 
-**Why `gemma3:4b`?**
-It's a small, fast model that runs on consumer hardware (4–8 GB RAM). You can change this to any model you have pulled via Ollama (e.g., `llama3.2`, `mistral`, `phi3`).
+**Why `qwen3:8b`?**
+It's a capable local model with strong multilingual support and tool calling. You can change this to any model you have pulled via Ollama (e.g., `llama3.1`, `mistral`, `qwen2.5`).
 
 ### 3.3 The System Prompt
 
@@ -253,11 +253,11 @@ curl -fsSL https://ollama.com/install.sh | sh
 # Verify it's running
 ollama --version
 
-# Pull the Gemma3 4B model (~2.5 GB download)
-ollama pull gemma3:4b
+# Pull the Qwen3 8B model
+ollama pull qwen3:8b
 
 # Test the model
-ollama run gemma3:4b "Say hello in one sentence."
+ollama run qwen3:8b "Say hello in one sentence."
 ```
 
 **Alternative models (if RAM is limited):**
@@ -312,7 +312,7 @@ python3 test_tts.py
 
 **Test Ollama:**
 ```bash
-ollama run gemma3:4b "Are you working?"
+ollama run qwen3:8b "Are you working?"
 ```
 
 ---
@@ -344,12 +344,12 @@ python3 sopno.py
 
 Edit `sopno.py` line 13:
 ```python
-MODEL_NAME = "gemma3:4b"   # Change to any ollama model name
+MODEL_NAME = "qwen3:8b"    # Change to any ollama model name
 ```
 
 Available models you can use after pulling:
 ```
-gemma3:4b        — Default. Good balance of speed and quality.
+qwen3:8b         — Default. Strong multilingual + tool calling.
 mistral          — Better reasoning, slightly slower.
 phi3             — Very fast, good for weak hardware.
 llama3.2         — Latest Meta model, excellent quality.
@@ -653,8 +653,8 @@ class SopnoHUD(QMainWindow):
 ### Complete Upgraded Stack
 
 ```
-Current:  Google STT → gemma3:4b → gTTS
-Upgraded: faster-whisper → gemma3:4b + tools → edge-tts/piper
+Current:  Google STT → qwen3:8b → gTTS
+Upgraded: faster-whisper → qwen3:8b + tools → edge-tts/piper
 Daemon:   systemd service
 HUD:      PyQt5 floating overlay
 Wake:     sherpa-onnx KWS

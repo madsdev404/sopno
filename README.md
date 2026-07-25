@@ -56,7 +56,7 @@
 *   **📡 Custom Local Wake Word:** Zero Picovoice licenses or API keys. Driven by a fast, offline `sherpa-onnx` Keyword Spotter with active boosting.
 *   **🗣️ Bilingual Speech-to-Text (STT):** High-speed transcribing powered by `faster-whisper` (CTranslate2) with native bilingual recognition for English and Bengali.
 *   **🔊 Expressive Neural Text-to-Speech (TTS):** True offline speech generation using Coqui TTS (with high-quality dual-language voices) and lightweight fallback systems.
-*   **🧠 Local LLM Brain:** Integrated with `Ollama` running `gemma3:4b` (or any compatible model) supporting contextual, dynamic conversation history summarization.
+*   **🧠 Local LLM Brain:** Integrated with `Ollama` running `qwen3:8b` (or any compatible model) supporting contextual, dynamic conversation history summarization.
 *   **📺 Elegant Glassmorphic UI:** A floating, transparent PyQt5 HUD that sits beautifully on top of your windows to show live assistant states (Standby, Listening, Thinking, Speaking).
 *   **🛠️ Full OS Desktop Integration:** Voice-controlled tools to adjust system volume, control media streams (Play/Pause/Skip), unlock/lock screens, retrieve exact time/date, search the web, and run custom applications.
 *   **⚙️ Background System Daemon:** Comes pre-packaged with user systemd service files to boot automatically and run robustly as an always-on background service.
@@ -106,7 +106,7 @@ Sopno uses Ollama to run high-performance offline models:
    ```
 2. Pull the default highly optimized Gemma3 model:
    ```bash
-   ollama pull gemma3:4b
+   ollama pull qwen3:8b
    ```
 
 ### 🛠️ Step 2: Clone and Setup Virtual Environment
