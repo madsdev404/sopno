@@ -242,10 +242,11 @@ That sequence produces a “million-dollar company” feel through **reliability
 
 ## 11. Related docs
 
-- `doc/ARCHITECTURE.md` — folder structure and module boundaries  
-- `doc/ROADMAP_STATUS.md` — feature completion status  
-- `doc/SOPNO_COMPLETE_GUIDE.md` — end-to-end product guide  
-- `doc/tts_integration.md` — TTS engine notes  
+- [overview.md](overview.md) — folder structure and module boundaries  
+- [project-assessment.md](project-assessment.md) — implementation status and prioritized suggestions  
+- [../roadmap/status.md](../roadmap/status.md) — feature completion status  
+- [../getting-started/user-guide.md](../getting-started/user-guide.md) — end-to-end product guide  
+- [../modules/voice/tts.md](../modules/voice/tts.md) — TTS engine notes  
 
 ---
 

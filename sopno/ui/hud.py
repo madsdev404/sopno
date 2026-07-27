@@ -1172,7 +1172,7 @@ class SopnoHUDWindow(QMainWindow):
         if not text:
             return
         self.text_input.clear()
-        self.chat.add_message("user", text)
+        # Don't add_message here — assistant emits speech_detected once (same as voice)
         if hasattr(self, "worker") and self.worker:
             self.worker.submit_text(text)
 

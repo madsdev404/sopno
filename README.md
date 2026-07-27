@@ -84,6 +84,18 @@ sopno/
 
 ---
 
+## 📚 Documentation
+
+Full docs live in [`doc/`](doc/README.md):
+
+- [Getting started](doc/getting-started/installation.md) — install and first run
+- [User guide](doc/getting-started/user-guide.md) — complete product guide
+- [Architecture](doc/architecture/overview.md) — modules and data flow
+- [Project assessment](doc/architecture/project-assessment.md) — what's built, gaps, next steps
+- [Feature roadmap](doc/roadmap/features.md) — full vision
+
+---
+
 ## 🚀 Getting Started
 
 ### 📋 Prerequisites

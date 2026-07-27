@@ -96,12 +96,11 @@ sopno/
 ├── 📁 logs/                            ← Runtime logs (gitignored)
 │   └── 📄 sopno.log
 │
-└── 📁 doc/                             ← DOCUMENTATION
-    ├── 📄 ARCHITECTURE.md              ← This file — living reference
-    ├── 📄 ROADMAP_STATUS.md            ← Feature progress tracker
-    ├── 📄 tts_integration.md           ← TTS deep-dive notes
-    ├── 📄 SOPNO_COMPLETE_GUIDE.md      ← Full user guide
-    └── 📄 01_installation.md           ← Installation instructions
+└── 📁 doc/                             ← DOCUMENTATION (see doc/README.md)
+    ├── 📁 getting-started/             ← installation, user guide
+    ├── 📁 architecture/                ← overview, observations, assessment
+    ├── 📁 roadmap/                     ← features vision, status tracker
+    └── 📁 modules/                     ← per-package docs (voice/tts, …)
 ```
 
 ---

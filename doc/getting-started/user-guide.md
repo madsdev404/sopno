@@ -83,9 +83,12 @@ sopno/
 ├── test_stt.py         ← Microphone test script
 ├── test_tts.py         ← Speaker/TTS test script
 ├── venv/               ← Python virtual environment
-├── doc/
-│   ├── 01_installation.md
-│   └── SOPNO_COMPLETE_GUIDE.md  ← This file
+├── doc/                        ← See doc/README.md for full index
+│   ├── getting-started/
+│   │   ├── installation.md
+│   │   └── user-guide.md       ← This file
+│   ├── architecture/
+│   └── roadmap/
 └── .gitignore
 ```
 
