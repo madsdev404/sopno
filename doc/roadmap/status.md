@@ -23,6 +23,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Dynamic Config Integration:** Automatically loads custom wake words from `config.json`, tokenizes them dynamically using the model's vocabulary, and applies boosting scores at runtime.
 * [x] **No Keys Required:** Completely free, open-source, and local, eliminating the need for Picovoice API access keys or cloud accounts.
 * [x] **Smart Fallback:** Implemented a continuous, auto-calibrating SpeechRecognition/Google STT wake-word listener if `sherpa-onnx` model files are missing, ensuring 100% out-of-the-box operation.
+* [x] **Wired into Main Loop:** Wake word detection is now integrated into `assistant.py` with configurable `listening_mode` ("wake_word" or "always_on"). HUD and CLI reflect the active mode.
 
 ### 3. Voice Input (Speech-to-Text) — **[COMPLETED]**
 * [x] **Local Offline STT:** Migrated from online Google SpeechRecognition to fully offline, high-speed `faster-whisper`.
@@ -60,4 +61,8 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ### [July 17, 2026] — Step 4: Replaced Picovoice with sherpa-onnx KWS
 * **Modified Files:** `gui.py`, `config.json`, `doc/ROADMAP_STATUS.md`
 * **Impact:** Upgraded wake-word detection to a completely free, local, open-source model using `sherpa-onnx`. Removed requirements for Picovoice access keys and commercial licenses, allowing unlimited custom local wake words (e.g., "Sopno", "Dream").
+
+### [July 28, 2026] — Step 5: Wired Wake Word into Main Loop
+* **Modified Files:** `assistant.py`, `config.json`, `settings.py`, `hud.py`, `cli.py`, `tests/test_wakeword.py`, `doc/roadmap/status.md`
+* **Impact:** Wake word detection is now fully integrated into the assistant pipeline. Added `listening_mode` config option ("wake_word" or "always_on") to choose between gated wake-word activation and continuous VAD listening. HUD shows "Say 'Sopno'…" in wake_word standby; CLI banner reflects active mode. Added unit tests for `WakeWordDetector`.
 

@@ -26,6 +26,7 @@ from sopno.tools.registry import execute_tool
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
+from sopno.voice.wakeword import WakeWordDetector
 
 # Only attach the heavy tool schema when the utterance looks action-oriented.
 # Pure chat without tools is much faster on CPU (seconds vs tens of seconds).
@@ -66,6 +67,10 @@ class SopnoAssistant:
         self.dispatcher = CommandDispatcher()
         self.listener = Listener(log_callback=self.on_log_message)
 
+        # Listening mode: "wake_word" gates on wake word; "always_on" uses continuous VAD
+        self.listening_mode = getattr(settings, "listening_mode", "wake_word")
+        self._wake_detector: Optional[WakeWordDetector] = None
+
         # voice = mic + TTS; text = typed input + silent replies
         self.interaction_mode = "voice"
         self._pending_text: Optional[str] = None
@@ -92,6 +97,14 @@ class SopnoAssistant:
         # Voice resumes idle listening; text sits quiet until typed input
         self.on_status_changed("listening" if mode == "voice" else "standby")
 
+    def set_listening_mode(self, mode: str) -> None:
+        """Switch between wake_word and always_on listening."""
+        mode = (mode or "").strip().lower()
+        if mode not in ("wake_word", "always_on"):
+            return
+        self.listening_mode = mode
+        self._text_event.set()  # unblock wake word wait if active
+
     def submit_text(self, text: str) -> None:
         """Queue a typed message (text mode)."""
         cleaned = (text or "").strip()
@@ -105,6 +118,13 @@ class SopnoAssistant:
 
     def _voice_active(self) -> bool:
         return self.running and self.interaction_mode == "voice"
+
+    @property
+    def wake_detector(self) -> WakeWordDetector:
+        """Lazy-init wake word detector (only created when wake_word mode is active)."""
+        if self._wake_detector is None:
+            self._wake_detector = WakeWordDetector(log_callback=self.on_log_message)
+        return self._wake_detector
 
     def _deliver_reply(self, text: str, *, status: str = "speaking") -> None:
         """Show reply in UI; speak aloud only in voice mode."""
@@ -145,7 +165,17 @@ class SopnoAssistant:
                             return text
                 continue
 
-            # ── Voice path: continuous conversation (no wake-word gate) ───────
+            # ── Voice path ──────────────────────────────────────────────────
+            if self.listening_mode == "wake_word":
+                # Gate: wait for wake word before listening for a command
+                self.on_status_changed("standby")
+                self.on_log_message(f"Waiting for wake word ({', '.join(settings.wake_words)})…")
+                if not self.wake_detector.wait_for_wakeword(
+                    self.listener.recognizer, running_check=self._voice_active
+                ):
+                    return None
+                self.on_log_message("Wake word detected — listening for command.")
+
             self.on_status_changed("listening")
             self.on_log_message("Listening… say something when you're ready.")
 
@@ -335,9 +365,11 @@ class SopnoAssistant:
 
         welcome_text = "Hello! I'm Sopno. I'm listening whenever you're ready."
         self._deliver_reply(welcome_text)
-        self.on_status_changed("listening")
+        initial_status = "standby" if self.listening_mode == "wake_word" else "listening"
+        self.on_status_changed(initial_status)
 
         self.on_log_message(f"Using LLM Model: {settings.model_name}")
+        self.on_log_message(f"Listening mode: {self.listening_mode}")
 
         while self.running:
             try:

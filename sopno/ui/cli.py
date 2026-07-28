@@ -8,16 +8,21 @@ assistant status and transcription outputs directly in the console.
 """
 
 import sys
+from sopno.config.settings import settings
 from sopno.core.assistant import SopnoAssistant
 
 
 def run_cli() -> None:
     """Run Sopno in full CLI console mode."""
+    wake_words_str = ", ".join(f"'{w}'" for w in getattr(settings, "wake_words", ["dream"]))
+    mode = getattr(settings, "listening_mode", "wake_word")
+    control = f"Offline wake-word (say {wake_words_str})" if mode == "wake_word" else "Always-on listening (speak anytime)"
+
     print("=" * 60)
     print("🌙  SOPNO AI — TERMINAL CLI MODE")
     print("  Language: Bilingual (English / Bangla)")
     print("  Memory:   Dynamic Summarization enabled")
-    print("  Control:  Offline wake-word (say 'Sopno' or 'Dream')")
+    print(f"  Control:  {control}")
     print("=" * 60)
 
     def on_status_changed(status: str) -> None:
@@ -35,7 +40,7 @@ def run_cli() -> None:
         print(f"\033[1;33mYou said:\033[0m “{text}”")
 
     def on_reply_generated(text: str) -> None:
-        print(f"\033[1;32mSopno:\033[0m {text}")
+        print(f"\033[1;32mAssistant:\033[0m {text}")
 
     def on_log_message(msg: str) -> None:
         print(f"\033[2m[System] {msg}\033[0m")

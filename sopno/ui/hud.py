@@ -478,13 +478,13 @@ class ModeToggle(QFrame):
         self.voice_btn.setCheckable(True)
         self.voice_btn.setCursor(Qt.PointingHandCursor)
         self.voice_btn.setFocusPolicy(Qt.NoFocus)
-        self.voice_btn.setToolTip("Voice mode — speak to Sopno")
+        self.voice_btn.setToolTip("Voice mode — speak to assistant")
 
         self.text_btn = QPushButton(" Text")
         self.text_btn.setCheckable(True)
         self.text_btn.setCursor(Qt.PointingHandCursor)
         self.text_btn.setFocusPolicy(Qt.NoFocus)
-        self.text_btn.setToolTip("Text mode — type to Sopno")
+        self.text_btn.setToolTip("Text mode — type to assistant")
 
         self._group.addButton(self.voice_btn)
         self._group.addButton(self.text_btn)
@@ -731,6 +731,9 @@ class AssistantWorker(QObject):
     def set_mode(self, mode: str) -> None:
         self.assistant.set_interaction_mode(mode)
 
+    def set_listening_mode(self, mode: str) -> None:
+        self.assistant.set_listening_mode(mode)
+
     def submit_text(self, text: str) -> None:
         self.assistant.submit_text(text)
 
@@ -833,7 +836,7 @@ class SopnoHUDWindow(QMainWindow):
         self.hide_btn.clicked.connect(self.hide_hud)
 
         self.close_btn = self._chrome_btn(
-            "×", "#F07178", "Close Sopno", size=22, font_size=14,
+            "×", "#F07178", "Close", size=22, font_size=14,
         )
         self.close_btn.clicked.connect(self.close_app)
 
@@ -851,6 +854,12 @@ class SopnoHUDWindow(QMainWindow):
         stage.setAlignment(Qt.AlignCenter)
 
         self.robot = AliveRobotFace(size=100)
+
+        # Status row: label + listening mode chip
+        status_row = QHBoxLayout()
+        status_row.setAlignment(Qt.AlignCenter)
+        status_row.setSpacing(6)
+
         self.status_label = QLabel("Idle")
         self.status_label.setAlignment(Qt.AlignCenter)
         self.status_label.setFont(QFont("IBM Plex Sans", 9, QFont.Medium))
@@ -858,8 +867,20 @@ class SopnoHUDWindow(QMainWindow):
             "color: #8B9BB4; background: transparent; letter-spacing: 0.5px;"
         )
 
+        self.listening_chip = QPushButton()
+        self.listening_chip.setCheckable(True)
+        self.listening_chip.setCursor(Qt.PointingHandCursor)
+        self.listening_chip.setFocusPolicy(Qt.NoFocus)
+        self.listening_chip.setFixedHeight(18)
+        self.listening_chip.setToolTip("Click to toggle wake word / always-on")
+        self.listening_chip.clicked.connect(self._toggle_listening_mode)
+        self._style_listening_chip()
+
+        status_row.addWidget(self.status_label)
+        status_row.addWidget(self.listening_chip)
+
         stage.addWidget(self.robot, 0, Qt.AlignCenter)
-        stage.addWidget(self.status_label)
+        stage.addLayout(status_row)
         root.addLayout(stage)
         root.addSpacing(8)
 
@@ -890,7 +911,7 @@ class SopnoHUDWindow(QMainWindow):
         dock_row.setSpacing(6)
 
         self.text_input = QLineEdit()
-        self.text_input.setPlaceholderText("Message Sopno…")
+        self.text_input.setPlaceholderText("Type a message…")
         self.text_input.setToolTip("Type a message and press Enter to send")
         self.text_input.setFont(QFont("IBM Plex Sans", 10))
         self.text_input.setStyleSheet("""
@@ -931,6 +952,7 @@ class SopnoHUDWindow(QMainWindow):
 
         self.setCentralWidget(self.central_widget)
         self.apply_size_preset("medium", anchor_top_right=True)
+        self._style_listening_chip()
         self._apply_mode_layout()
         self.position_hud()
 
@@ -1149,6 +1171,7 @@ class SopnoHUDWindow(QMainWindow):
     def _apply_mode_layout(self) -> None:
         is_text = self.interaction_mode == "text"
         self.dock.setVisible(is_text)
+        self.listening_chip.setVisible(not is_text)
         self.mode_toggle.set_mode(self.interaction_mode, emit=False)
 
         if is_text:
@@ -1156,7 +1179,11 @@ class SopnoHUDWindow(QMainWindow):
             self.text_input.setFocus()
         else:
             if self.current_status in ("standby", "listening"):
-                self.context_label.setText(self._listen_hint)
+                if self.current_status == "standby" and getattr(settings, "listening_mode", "wake_word") == "wake_word":
+                    wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
+                    self.context_label.setText(f"Say '{wake_words_str}'…")
+                else:
+                    self.context_label.setText(self._listen_hint)
 
     def set_interaction_mode(self, mode: str) -> None:
         mode = mode.lower().strip()
@@ -1166,6 +1193,67 @@ class SopnoHUDWindow(QMainWindow):
         self._apply_mode_layout()
         if hasattr(self, "worker") and self.worker:
             self.worker.set_mode(mode)
+
+    def set_listening_mode(self, mode: str) -> None:
+        mode = mode.lower().strip()
+        if mode not in ("wake_word", "always_on"):
+            return
+        settings.listening_mode = mode
+        if hasattr(self, "worker") and self.worker:
+            self.worker.set_listening_mode(mode)
+            self.worker.log_message.emit(f"Listening mode → {mode}")
+        self._style_listening_chip()
+        if self.interaction_mode == "voice" and self.current_status in ("standby", "listening"):
+            if mode == "wake_word":
+                wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
+                self.context_label.setText(f"Say '{wake_words_str}'…")
+            else:
+                self.context_label.setText(self._listen_hint)
+
+    def _toggle_listening_mode(self) -> None:
+        current = getattr(settings, "listening_mode", "wake_word")
+        new_mode = "always_on" if current == "wake_word" else "wake_word"
+        self.set_listening_mode(new_mode)
+
+    def _style_listening_chip(self) -> None:
+        mode = getattr(settings, "listening_mode", "wake_word")
+        is_wake = mode == "wake_word"
+        text = "🔔 Wake" if is_wake else "🎤 Always"
+        self.listening_chip.setText(text)
+        self.listening_chip.setChecked(is_wake)
+        self.listening_chip.setFixedWidth(68)
+        if is_wake:
+            self.listening_chip.setStyleSheet("""
+                QPushButton {
+                    background: rgba(155, 140, 242, 0.15);
+                    color: #C4B8F0;
+                    border: 1px solid rgba(155, 140, 242, 0.25);
+                    border-radius: 9px;
+                    font-size: 8px;
+                    font-weight: 600;
+                    padding: 0px 6px;
+                }
+                QPushButton:hover {
+                    background: rgba(155, 140, 242, 0.25);
+                    border-color: rgba(155, 140, 242, 0.40);
+                }
+            """)
+        else:
+            self.listening_chip.setStyleSheet("""
+                QPushButton {
+                    background: rgba(74, 222, 154, 0.15);
+                    color: #A0F0C8;
+                    border: 1px solid rgba(74, 222, 154, 0.25);
+                    border-radius: 9px;
+                    font-size: 8px;
+                    font-weight: 600;
+                    padding: 0px 6px;
+                }
+                QPushButton:hover {
+                    background: rgba(74, 222, 154, 0.25);
+                    border-color: rgba(74, 222, 154, 0.40);
+                }
+            """)
 
     def send_text_message(self) -> None:
         text = self.text_input.text().strip()
@@ -1329,12 +1417,13 @@ class SopnoHUDWindow(QMainWindow):
 
         if self.interaction_mode == "text":
             return
+        wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
         hints = {
-            "standby": self._listen_hint,
+            "standby":   f"Say '{wake_words_str}'…" if getattr(settings, "listening_mode", "wake_word") == "wake_word" else self._listen_hint,
             "listening": self._listen_hint,
-            "thinking": "Thinking…",
-            "speaking": "Speaking…",
-            "error": "Something went wrong",
+            "thinking":  "Thinking…",
+            "speaking":  "Speaking…",
+            "error":     "Something went wrong",
         }
         self.context_label.setText(hints.get(self.current_status, self._listen_hint))
 

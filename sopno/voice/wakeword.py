@@ -21,7 +21,7 @@ from sopno.voice.stt import transcribe
 
 
 class WakeWordDetector:
-    """Detects when the user says the wake word (e.g. 'sopno' or 'dream')."""
+    """Detects when the user says the wake word."""
 
     def __init__(self, log_callback: Optional[Callable[[str], None]] = None):
         self.log = log_callback or (lambda msg: print(f"[WakeWord] {msg}"))
@@ -70,9 +70,6 @@ class WakeWordDetector:
                 keywords_to_register = []
                 for kw in settings.wake_words:
                     kw_clean = kw.lower().strip()
-                    # Fallback transliteration for Bangla script to match phonetic gigaspeech
-                    if kw_clean in ["স্বপ্ন", "সোপনো", "সোপন"]:
-                        kw_clean = "sopno"
                     kw_clean = re.sub(r'[^a-zA-Z\s]', '', kw_clean)
                     if kw_clean:
                         token_seq = tokenize_word(kw_clean)
@@ -80,7 +77,7 @@ class WakeWordDetector:
                             keywords_to_register.append(f"{token_seq} :1.5")
 
                 if not keywords_to_register:
-                    keywords_to_register = ["▁SO P N O :1.5", "▁DR E A M :1.5"]
+                    keywords_to_register = ["▁DR E A M :1.5"]
 
                 temp_keywords_path = model_dir / "active_keywords.txt"
                 with open(temp_keywords_path, "w", encoding="utf-8") as f:
@@ -163,9 +160,8 @@ class WakeWordDetector:
                 self.log(f"Heard: '{text}'")
                 text_lower = text.lower().strip()
 
-                # Match wake words or default phonetic fallbacks
-                if any(ww.lower().strip() in text_lower for ww in settings.wake_words) or \
-                   "sopno" in text_lower or "স্বপ্ন" in text_lower or "dream" in text_lower:
+                # Match wake words from config
+                if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
                     self.log("Wake word detected!")
                     return True
 

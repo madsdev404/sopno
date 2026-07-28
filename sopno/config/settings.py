@@ -44,8 +44,12 @@ class Settings:
         # "classic" = SpeechRecognition mic (reliable). "vad" = Silero/PyAudio path.
         self.stt_capture: str = data.get("stt_capture", "classic")
 
+        # ── Listening mode ─────────────────────────────────────
+        # "wake_word" = wait for wake word before listening; "always_on" = continuous VAD
+        self.listening_mode: str = data.get("listening_mode", "wake_word")
+
         # ── Wake-word ─────────────────────────────────────────
-        self.wake_words: list       = data.get("wake_words", ["sopno", "dream"])
+        self.wake_words: list       = data.get("wake_words", ["dream"])
 
         # ── Language ──────────────────────────────────────────
         self.voice_lang_bn: str     = data.get("voice_lang_bn", "bn")
