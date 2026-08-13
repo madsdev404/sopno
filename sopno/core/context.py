@@ -8,9 +8,16 @@ history gets too long, and appends language constraints dynamically before
 sending prompts to the LLM.
 """
 
+from __future__ import annotations
+
+from typing import TYPE_CHECKING, Optional
+
 from sopno.config.settings import settings
 from sopno.config.prompts import SYSTEM_PROMPT
 from sopno.llm.summarizer import compress_history
+
+if TYPE_CHECKING:
+    from sopno.memory.store import MemoryStore
 
 
 class ConversationContext:
@@ -19,6 +26,8 @@ class ConversationContext:
     def __init__(self):
         self._messages: list[dict[str, str]] = []
         self.current_language: str = "en"  # "en" or "bn"
+        # Set by SopnoAssistant so long-term memories can be injected each turn.
+        self.memory_store: Optional["MemoryStore"] = None
         self.reset()
 
     def reset(self) -> None:
@@ -45,6 +54,11 @@ class ConversationContext:
         This guides the LLM to reply in the correct language.
         """
         chat_messages = list(self._messages)
+
+        memory_block = self._memory_block()
+        if memory_block:
+            chat_messages.insert(1, {"role": "system", "content": memory_block})
+
         if self.current_language == "bn":
             chat_messages.append({
                 "role": "system",
@@ -56,6 +70,37 @@ class ConversationContext:
                 "content": "IMPORTANT: You MUST respond in English only."
             })
         return chat_messages
+
+    def _memory_block(self) -> Optional[str]:
+        """
+        Build the [Memories] prompt block from long-term memory.
+
+        Respects settings.memory_max_tokens so the injected block never
+        degrades the small LLM context window. Pure read — no usage bumping.
+        """
+        store = self.memory_store
+        if store is None:
+            return None
+
+        memories = store.all(active_only=True, limit=settings.memory_recall_limit)
+        if not memories:
+            return None
+
+        budget_chars = settings.memory_max_tokens * 4  # rough chars-per-token
+        lines: list[str] = []
+        used = 0
+        for mem in memories:
+            line = f"• {mem['content']}"
+            if mem["importance"] >= 3:
+                line += " (important)"
+            if used + len(line) + 2 > budget_chars:
+                break
+            lines.append(line)
+            used += len(line) + 2
+
+        if not lines:
+            return None
+        return "[Memories you were told to remember]\n" + "\n".join(lines)
 
     @property
     def raw_messages(self) -> list[dict[str, str]]:

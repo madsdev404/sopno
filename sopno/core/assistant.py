@@ -21,6 +21,7 @@ from sopno.config.settings import settings
 from sopno.core.context import ConversationContext
 from sopno.core.dispatcher import CommandDispatcher
 from sopno.llm.client import chat as llm_chat, message_as_dict
+from sopno.memory.store import MemoryStore
 from sopno.tools.schema import TOOLS_SCHEMA
 from sopno.tools.registry import execute_tool
 from sopno.voice.listener import Listener
@@ -46,6 +47,120 @@ _TOOLISH = re.compile(
 _POST_SPEAK_SETTLE_S = 0.45
 
 
+# ── Memory intent patterns (English + Bangla) ────────────────────────────────
+# Order of evaluation matters: recall before remember (recall phrases contain
+# "remember"), and remember before forget ("don't forget X" must REMEMBER).
+
+_MEMORY_FORGET_ALL_EN = re.compile(
+    r"\bforget everything\b|\berase\s+(?:all|your|every)\s+(?:memory|memories)\b|"
+    r"\bclear\s+(?:your|all)\s+(?:memory|memories)\b",
+    re.IGNORECASE,
+)
+
+_MEMORY_RECALL_EN = re.compile(
+    r"\bwhat do you remember\b|\bwhat memories\b|\bwhat have you remembered\b|"
+    r"\bdo you remember anything\b|\bwhat did i tell you\b|"
+    r"\bwhat did you remember\b|\btell me what you remember\b",
+    re.IGNORECASE,
+)
+
+_MEMORY_REMEMBER_EN = re.compile(
+    r"\b(?:remember\s+that|remember\s+this|remember|don'?t\s+forget|"
+    r"do\s+not\s+forget|note\s+that|take\s+a\s+note|take\s+note)"
+    r"\s+(?:that\s+)?(?:about\s+)?(.+)$",
+    re.IGNORECASE,
+)
+
+_MEMORY_FORGET_EN = re.compile(
+    r"\bforget\s+(?:that\s+|about\s+)?(.+)$",
+    re.IGNORECASE,
+)
+
+_MEMORY_FORGET_ALL_BN = re.compile(
+    r"(?<!\w)সব\s+ভুলে\s+যাও(?!\w)|(?<!\w)সব\s+ভুলে\s+যেও(?!\w)|"
+    r"(?<!\w)সব\s+মনে\s+থাকা\s+মুছে\s+দাও(?!\w)|"
+    r"(?<!\w)সব\s+মুছে\s+দাও(?!\w)|"
+    r"(?<!\w)মনে\s+থাকা\s+সব\s+মুছে\s+দাও(?!\w)",
+)
+
+_MEMORY_RECALL_BN = re.compile(
+    r"(?<!\w)(?:কী|কি)\s+মনে\s+আছে(?!\w)|(?<!\w)(?:কী|কি)\s+মনে\s+রেখেছ(?!\w)|"
+    r"(?<!\w)(?:কী|কি)\s+মনে\s+রেখেছো(?!\w)|(?<!\w)(?:কী|কি)\s+মনে\s+রেখ(?!\w)|"
+    r"(?<!\w)তুমি\s+(?:কী|কি)\s+মনে\s+(?:রাখো|রাখ)(?!\w)|"
+    r"(?<!\w)(?:কী|কি)\s+জিনিস\s+মনে\s+আছে(?!\w)|"
+    r"(?<!\w)আমার\s+সম্পর্কে\s+(?:কী|কি)\s+মনে\s+আছে(?!\w)",
+)
+
+_MEMORY_REMEMBER_BN = re.compile(
+    r"(?<!\w)(?:মনে\s+রাখো|মনে\s+রাখ|মনে\s+রাখুন|মনে\s+রেখো|মনে\s+রেখ)"
+    r"\s+(?:যে\s+)?(.+)$"
+    r"|(?<!\w)(?:ভুলো\s+না|ভুলে\s+যেও\s+না)\s+(?:যে\s+)?(.+)$"
+)
+
+_MEMORY_FORGET_BN = re.compile(
+    r"(?<!\w)(?:ভুলে\s+যাও|ভুলে\s+যেও|মুছে\s+ফেলো|মনে\s+থেকে\s+মুছে\s+দাও)"
+    r"\s+(?:যে\s+)?(.+)$",
+)
+
+_MEMORY_TOPIC_EN = re.compile(r"\b(?:about|regarding)\s+(.+)$", re.IGNORECASE)
+# Bangla puts the topic BEFORE সম্পর্কে/নিয়ে: "ফ্লাস্ক সম্পর্কে কী মনে আছে"
+_MEMORY_TOPIC_BN = re.compile(r"(.+?)\s+(?:সম্পর্কে|নিয়ে)\s+(?:কী|কি)\s+মনে")
+
+
+def _memory_topic(text: str, is_bn: bool) -> str:
+    """Extract the recall topic from 'what do you remember about <topic>'."""
+    pattern = _MEMORY_TOPIC_BN if is_bn else _MEMORY_TOPIC_EN
+    match = pattern.search(text.strip())
+    if not match:
+        return ""
+    return match.group(1).strip().rstrip("?।.!?")
+
+
+def parse_memory_intent(text: str) -> Optional[tuple[str, str]]:
+    """
+    Detect explicit memory commands via rules (fast path, no LLM call).
+
+    Returns (action, content):
+      ("remember",  fact)    — store this fact
+      ("forget",    target)  — forget a specific memory
+      ("forget_all", "")     — forget everything
+      ("recall",    topic)   — recall memories (topic may be "")
+      None                   — not a memory command
+
+    Evaluation order: forget_all → recall → remember → forget.
+    """
+    if not text:
+        return None
+
+    txt = text.strip()
+    is_bn = bool(re.search(r"[\u0980-\u09FF]", txt))
+
+    if is_bn:
+        if _MEMORY_FORGET_ALL_BN.search(txt):
+            return ("forget_all", "")
+        if _MEMORY_FORGET_BN.search(txt):
+            target = _MEMORY_FORGET_BN.search(txt).group(1).strip().rstrip("?।.!?")
+            return ("forget", target) if target else None
+        if _MEMORY_RECALL_BN.search(txt):
+            return ("recall", _memory_topic(txt, True))
+        if (m := _MEMORY_REMEMBER_BN.search(txt)) is not None:
+            content = (m.group(1) or m.group(2) or "").strip().rstrip("?।.!?")
+            return ("remember", content) if content else None
+    else:
+        if _MEMORY_FORGET_ALL_EN.search(txt):
+            return ("forget_all", "")
+        if _MEMORY_RECALL_EN.search(txt):
+            return ("recall", _memory_topic(txt, False))
+        if (m := _MEMORY_REMEMBER_EN.search(txt)) is not None:
+            content = m.group(1).strip().rstrip("?.!")
+            return ("remember", content) if content else None
+        if (m := _MEMORY_FORGET_EN.search(txt)) is not None:
+            target = m.group(1).strip().rstrip("?.!")
+            return ("forget", target) if target else None
+
+    return None
+
+
 class SopnoAssistant:
     """The central brain that coordinates the Speech-to-Text-to-LLM-to-TTS pipeline."""
 
@@ -66,6 +181,10 @@ class SopnoAssistant:
         self.context = ConversationContext()
         self.dispatcher = CommandDispatcher()
         self.listener = Listener(log_callback=self.on_log_message)
+
+        # Persistent long-term memory — open once, shared with the context
+        self.memory_store = MemoryStore()
+        self.context.memory_store = self.memory_store
 
         # Listening mode: "wake_word" gates on wake word; "always_on" uses continuous VAD
         self.listening_mode = getattr(settings, "listening_mode", "wake_word")
@@ -239,6 +358,68 @@ class SopnoAssistant:
 
         return None
 
+    def _handle_memory_intent(self, cmd_text: str) -> Optional[str]:
+        """
+        Handle explicit memory commands (remember / forget / recall).
+
+        Returns the spoken reply if this was a memory command, else None so the
+        normal dispatcher/LLM pipeline takes over.
+        """
+        intent = parse_memory_intent(cmd_text)
+        if intent is None:
+            return None
+
+        action, content = intent
+        is_bn = bool(re.search(r"[\u0980-\u09FF]", cmd_text))
+
+        if action == "remember":
+            self.memory_store.remember(content)
+            self.on_log_message(f"[Memory] Stored: '{content}'")
+            return (
+                "Got it. I'll remember that."
+                if not is_bn
+                else "ঠিক আছে, আমি এটা মনে রাখব।"
+            )
+
+        if action == "recall":
+            memories = self.memory_store.recall(
+                content, limit=settings.memory_recall_limit
+            )
+            if not memories:
+                return (
+                    "I don't have any memories about that yet."
+                    if not is_bn
+                    else "এই বিষয়ে আমার এখনো কিছু মনে নেই।"
+                )
+            facts = [m["content"] for m in memories]
+            prefix = "I remember: " if not is_bn else "আমার মনে আছে: "
+            return prefix + ", ".join(facts)
+
+        if action == "forget":
+            if self.memory_store.forget(text=content):
+                self.on_log_message(f"[Memory] Forgot: '{content}'")
+                return (
+                    "Okay, I've forgotten that."
+                    if not is_bn
+                    else "ঠিক আছে, আমি সেটা ভুলে গেছি।"
+                )
+            return (
+                "I couldn't find that in my memory."
+                if not is_bn
+                else "আমি ওটা আমার মনে খুঁজে পাইনি।"
+            )
+
+        if action == "forget_all":
+            count = self.memory_store.wipe()
+            self.on_log_message(f"[Memory] Wiped all memories ({count}).")
+            return (
+                f"Okay, I've cleared all {count} of my memories."
+                if not is_bn
+                else f"ঠিক আছে, আমি আমার সব {count}টি মনে থাকা জিনিস মুছে দিয়েছি।"
+            )
+
+        return None
+
     def _process_command(self, cmd_text: str) -> bool:
         """
         Run dispatcher / LLM for one command.
@@ -281,7 +462,15 @@ class SopnoAssistant:
             self.context.add_assistant_message(switch_text)
             return True
 
-        # C. Rule-based Dispatcher (Fast path)
+        # C. Memory commands (fast rule path — before tools / LLM)
+        memory_reply = self._handle_memory_intent(cmd_text)
+        if memory_reply is not None:
+            self._deliver_reply(memory_reply)
+            self.context.add_user_message(cmd_text)
+            self.context.add_assistant_message(memory_reply)
+            return True
+
+        # D. Rule-based Dispatcher (Fast path)
         self.on_log_message("Checking local system rules dispatcher…")
         tool_output = self.dispatcher.dispatch(cmd_text)
         if tool_output is not None:
@@ -291,7 +480,7 @@ class SopnoAssistant:
             self.context.add_assistant_message(tool_output)
             return True
 
-        # D. LLM Processing — tools only when the phrase looks action-oriented
+        # E. LLM Processing — tools only when the phrase looks action-oriented
         use_tools = bool(_TOOLISH.search(cmd_text))
         if use_tools:
             self.on_log_message("Querying Ollama with tools…")

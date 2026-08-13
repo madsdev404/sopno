@@ -122,3 +122,8 @@ models/
 
 # Application logs
 logs/
+
+# Long-term memory database (user data — never commit)
+sopno/memory/memory.db
+sopno/memory/memory.db-wal
+sopno/memory/memory.db-shm
