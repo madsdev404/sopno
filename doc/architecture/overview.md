@@ -47,7 +47,12 @@ sopno/
 │   │   ├── 📄 __init__.py
 │   │   ├── 📄 listener.py              ← Microphone capture & ambient noise calibration
 │   │   ├── 📄 wakeword.py              ← Wake-word engine (sherpa-onnx / fallback)
-│   │   ├── 📄 stt.py                   ← Speech-to-Text (faster-whisper / Google fallback)
+│   │   ├── 📁 stt/                     ← Speech-to-Text package (was stt.py)
+│   │   │   ├── 📄 __init__.py          ← Public API: transcribe()
+│   │   │   ├── 📄 whisper.py           ← faster-whisper model + transcription
+│   │   │   ├── 📄 filters.py           ← Hallucination / babble / script checks
+│   │   │   ├── 📄 scoring.py           ← Transcript scoring & audio sanity
+│   │   │   └── 📄 google.py            ← Online Google fallback engine
 │   │   └── 📄 tts.py                   ← Text-to-Speech (Coqui TTS / gTTS fallback)
 │   │
 │   ├── 📁 llm/                         ← THE AI MODEL LAYER
@@ -66,7 +71,20 @@ sopno/
 │   │
 │   ├── 📁 ui/                          ← EVERYTHING VISIBLE
 │   │   ├── 📄 __init__.py
-│   │   ├── 📄 hud.py                   ← PyQt5 glassmorphic HUD overlay (was gui.py)
+│   │   ├── 📁 hud/                     ← PyQt5 glassmorphic HUD (was hud.py)
+│   │   │   ├── 📄 __init__.py          ← Public API: run_hud()
+│   │   │   ├── 📄 window.py            ← SopnoHUDWindow layout + wiring
+│   │   │   ├── 📄 widgets.py           ← ModeToggle + ChatThread
+│   │   │   ├── 📄 robot.py             ← AliveRobotFace animation
+│   │   │   ├── 📄 worker.py            ← AssistantWorker signal bridge
+│   │   │   ├── 📄 theme.py             ← Size presets, status copy, QSS templates
+│   │   │   ├── 📄 icons.py             ← Vector icon painter
+│   │   │   ├── 📄 responsive.py        ← Responsive sizing mixin
+│   │   │   ├── 📄 resizing.py          ← Edge drag-resize mixin
+│   │   │   ├── 📄 tray.py              ← System tray mixin
+│   │   │   ├── 📄 chrome.py            ← Chrome / composer mixin
+│   │   │   ├── 📄 status.py            ← Status rendering mixin
+│   │   │   └── 📄 run.py               ← run_hud() + hot reload
 │   │   └── 📄 cli.py                   ← Terminal-mode interface (no GUI)
 │   │
 │   └── 📁 config/                      ← SETTINGS & PROMPTS
@@ -117,7 +135,7 @@ sopno/voice/listener.py        ← Captures mic audio, calibrates for noise
 sopno/voice/wakeword.py        ← Detects "Sopno" / "Dream" wake word
     │  (wakeword triggered)
     ▼
-sopno/voice/stt.py             ← Offline Whisper transcription → text
+sopno/voice/stt/__init__.py    ← Offline Whisper transcription → text
     │
     ▼
 sopno/core/dispatcher.py       ← Is this a TOOL call or a CHAT message?
@@ -135,7 +153,7 @@ sopno/core/dispatcher.py       ← Is this a TOOL call or a CHAT message?
          sopno/voice/tts.py    ← Coqui TTS synthesizes reply → audio
               │
               ▼
-         sopno/ui/hud.py       ← Shows text on glassmorphic HUD
+         sopno/ui/hud/window.py  ← Shows text on glassmorphic HUD
               │
               ▼
          🔊 User hears the response
@@ -167,7 +185,7 @@ Want to change LLM model?       → Only edit  sopno/llm/client.py
 Want to add a new skill?        → Only add   sopno/tools/your_tool.py
                                    and register it in sopno/tools/registry.py
 Want to change Sopno's persona? → Only edit  prompts/system.txt
-Want to change UI layout?       → Only edit  sopno/ui/hud.py
+Want to change UI layout?       → Only edit  sopno/ui/hud/window.py
 ```
 
 ---
@@ -177,7 +195,7 @@ Want to change UI layout?       → Only edit  sopno/ui/hud.py
 | Old file | New location |
 |---|---|
 | `sopno.py` | `sopno/core/assistant.py` + `sopno/core/dispatcher.py` + `main.py` |
-| `gui.py` | `sopno/ui/hud.py` |
+| `gui.py` | `sopno/ui/hud/` (was `sopno/ui/hud.py`) |
 | `tools.py` | `sopno/tools/system.py` + `sopno/tools/search.py` + `sopno/tools/datetime_tool.py` |
 | `tools_schema.py` | `sopno/tools/schema.py` |
 | `config.json` | root `config.json` (read via `sopno/config/settings.py`) |
