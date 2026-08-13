@@ -14,6 +14,7 @@ All project docs live here, organized to mirror the codebase layout.
 | Doc | Description |
 |-----|-------------|
 | [overview.md](architecture/overview.md) | Module layout, data flow, folder structure |
+| [code-organization.md](architecture/code-organization.md) | File-size standard, split pattern, migration plans |
 | [observations.md](architecture/observations.md) | Stack review and upgrade recommendations |
 | [project-assessment.md](architecture/project-assessment.md) | Implementation status, gaps, and prioritized suggestions |
 
