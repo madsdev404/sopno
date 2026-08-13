@@ -38,6 +38,13 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Core Functions:** Time/date, open apps, volume adjust, media controls, system stats, lock screen.
 * [x] **CLI Sync:** Tool calling works on the terminal interface (`sopno.py`) as well as the GUI.
 
+### 6. Long-Term Memory (SQLite) — **[PLANNED]**
+* [ ] **SQLite Memory Store:** Persistent long-term memory in `sopno/memory/store.py` (schema, CRUD, FTS5 search) — survives restarts.
+* [ ] **"Remember" Commands:** "remember that X", "forget X", "what do you remember?" in English and Bangla.
+* [ ] **Context Injection:** Relevant memories injected into the LLM prompt with a token-budget guard.
+* [ ] **Semantic Recall (future):** `sqlite-vec` embeddings for automatic similarity-based recall.
+* Design spec: [modules/memory/memory.md](../modules/memory/memory.md)
+
 ---
 
 ## 📓 Technical Progress Log

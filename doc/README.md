@@ -13,6 +13,7 @@ All project docs live here, organized to mirror the codebase layout.
 
 | Doc | Description |
 |-----|-------------|
+| [CODEBASE.md](CODEBASE.md) | **Complete codebase guide** — every folder, file, and function explained |
 | [overview.md](architecture/overview.md) | Module layout, data flow, folder structure |
 | [code-organization.md](architecture/code-organization.md) | File-size standard, split pattern, migration plans |
 | [observations.md](architecture/observations.md) | Stack review and upgrade recommendations |
@@ -32,6 +33,7 @@ Docs for specific packages (mirrors `sopno/`):
 | Module | Doc |
 |--------|-----|
 | voice | [tts.md](modules/voice/tts.md) |
+| memory | [memory.md](modules/memory/memory.md) |
 
 ---
 
@@ -44,5 +46,6 @@ doc/
 ├── architecture/
 ├── roadmap/
 └── modules/
-    └── voice/
+    ├── voice/
+    └── memory/
 ```
