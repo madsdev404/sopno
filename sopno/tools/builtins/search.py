@@ -1,6 +1,6 @@
 """
-sopno/tools/search.py
-━━━━━━━━━━━━━━━━━━━━━
+sopno/tools/builtins/search.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Web search tool.
 
 Performs a Google search using the system's default web browser.

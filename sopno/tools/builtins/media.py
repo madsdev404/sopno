@@ -1,6 +1,6 @@
 """
-sopno/tools/media.py
-━━━━━━━━━━━━━━━━━━━━
+sopno/tools/builtins/media.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Media playback controls.
 
 Uses 'playerctl' via MPRIS to control running media players on Linux.

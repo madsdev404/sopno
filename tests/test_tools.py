@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from sopno.tools.registry import execute_tool, get_registered_names
-from sopno.tools.datetime_tool import get_current_time
-from sopno.tools.system import open_application, control_volume
+from sopno.tools.builtins.datetime_tool import get_current_time
+from sopno.tools.builtins.system import open_application, control_volume
 
 
 class TestSopnoTools(unittest.TestCase):

@@ -9,10 +9,10 @@ implementations, providing a clean execution interface.
 
 from typing import Callable, Any
 
-from sopno.tools.system import open_application, control_volume, get_system_stats, lock_screen
-from sopno.tools.search import search_web
-from sopno.tools.datetime_tool import get_current_time
-from sopno.tools.media import play_media_control
+from sopno.tools.builtins.system import open_application, control_volume, get_system_stats, lock_screen
+from sopno.tools.builtins.search import search_web
+from sopno.tools.builtins.datetime_tool import get_current_time
+from sopno.tools.builtins.media import play_media_control
 
 
 # Map schema tool names to Python functions
