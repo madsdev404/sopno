@@ -1,13 +1,13 @@
 """
-sopno/ui/hud/status.py
-━━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/behaviors/status.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Status, speech, reply, and log rendering mixin.
 """
 
 from PyQt5.QtGui import QFont
 
 from sopno.config.settings import settings
-from sopno.ui.hud.theme import STATUS_COPY
+from sopno.ui.hud.visuals.theme import STATUS_COPY
 
 
 class StatusMixin:

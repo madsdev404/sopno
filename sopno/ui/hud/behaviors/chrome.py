@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/chrome.py
-━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/behaviors/chrome.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Header chrome, circular buttons, listening chip, and composer mixin.
 """
 
@@ -8,8 +8,8 @@ from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import QPushButton
 
 from sopno.config.settings import settings
-from sopno.ui.hud.icons import _paint_icon
-from sopno.ui.hud.theme import _CHROME, _ICON_BTN
+from sopno.ui.hud.visuals.icons import _paint_icon
+from sopno.ui.hud.visuals.theme import _CHROME, _ICON_BTN
 
 
 class ChromeMixin:

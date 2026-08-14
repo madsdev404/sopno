@@ -25,15 +25,10 @@ from PyQt5.QtWidgets import (
 )
 
 from sopno.config.settings import settings
-from sopno.ui.hud.chrome import ChromeMixin
-from sopno.ui.hud.icons import _paint_icon
-from sopno.ui.hud.responsive import ResponsiveMixin
-from sopno.ui.hud.resizing import ResizeMixin
-from sopno.ui.hud.robot import AliveRobotFace
-from sopno.ui.hud.status import StatusMixin
-from sopno.ui.hud.theme import MAX_SIZE, MIN_SIZE
-from sopno.ui.hud.tray import TrayMixin
-from sopno.ui.hud.widgets import ChatThread, ModeToggle
+from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, StatusMixin, TrayMixin
+from sopno.ui.hud.visuals.icons import _paint_icon
+from sopno.ui.hud.visuals.theme import MAX_SIZE, MIN_SIZE
+from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle
 from sopno.ui.hud.worker import AssistantWorker
 
 

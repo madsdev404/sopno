@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/responsive.py
-━━━━━━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/behaviors/responsive.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Responsive sizing mixin: preset sizes, drag-resize scaling, density tokens.
 """
 
@@ -9,8 +9,8 @@ from PyQt5.QtGui import QFont
 from PyQt5.QtWidgets import QApplication
 
 from sopno.config.settings import settings
-from sopno.ui.hud.icons import _paint_icon
-from sopno.ui.hud.theme import SIZE_PRESETS, _CHROME, _TOOL_ICON
+from sopno.ui.hud.visuals.icons import _paint_icon
+from sopno.ui.hud.visuals.theme import SIZE_PRESETS, _CHROME, _TOOL_ICON
 
 
 class ResponsiveMixin:

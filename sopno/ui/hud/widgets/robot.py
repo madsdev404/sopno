@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/robot.py
-━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/widgets/robot.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Animated robot face — blinks, glances, speaks, reacts to state.
 """
 
@@ -11,7 +11,7 @@ from PyQt5.QtCore import QPointF, QRectF, QTimer, Qt
 from PyQt5.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QRadialGradient
 from PyQt5.QtWidgets import QWidget
 
-from sopno.ui.hud.theme import STATE_ACCENT
+from sopno.ui.hud.visuals.theme import STATE_ACCENT
 
 
 class AliveRobotFace(QWidget):

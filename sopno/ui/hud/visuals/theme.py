@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/theme.py
-━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/visuals/theme.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Shared constants and QSS templates for the HUD package.
 """
 

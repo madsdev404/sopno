@@ -1,12 +1,12 @@
 """
-sopno/ui/hud/resizing.py
-━━━━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/behaviors/resizing.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Edge-drag resizing and window dragging mixin.
 """
 
 from PyQt5.QtCore import QPoint, QRect, Qt
 
-from sopno.ui.hud.theme import EDGE, MAX_SIZE, MIN_SIZE
+from sopno.ui.hud.visuals.theme import EDGE, MAX_SIZE, MIN_SIZE
 
 
 class ResizeMixin:

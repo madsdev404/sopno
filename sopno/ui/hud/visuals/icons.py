@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/icons.py
-━━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/visuals/icons.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Crisp vector icon painting for the HUD (no emoji).
 """
 

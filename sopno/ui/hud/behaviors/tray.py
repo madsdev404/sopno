@@ -1,6 +1,6 @@
 """
-sopno/ui/hud/tray.py
-━━━━━━━━━━━━━━━━━━━
+sopno/ui/hud/behaviors/tray.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 System tray icon and show/hide behaviour mixin.
 """
 

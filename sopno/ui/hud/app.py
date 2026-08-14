@@ -1,5 +1,5 @@
 """
-sopno/ui/hud/run.py
+sopno/ui/hud/app.py
 ━━━━━━━━━━━━━━━━━━
 HUD bootstrapping, hot-reload watcher, and the public entry point.
 """
@@ -17,7 +17,7 @@ from sopno.ui.hud.window import SopnoHUDWindow
 def _watch_paths_for_reload() -> list[str]:
     """Watch every module in this package plus the shared brain files."""
     hud_root = Path(__file__).resolve().parent
-    paths = [str(p) for p in hud_root.glob("*.py") if p.exists()]
+    paths = [str(p) for p in hud_root.rglob("*.py") if p.exists()]
     for extra in (
         hud_root.parent.parent / "config" / "settings.py",
         hud_root.parent.parent / "core" / "assistant.py",
