@@ -97,7 +97,7 @@ From `roadmap/features.md`, these major areas have **no implementation**:
 - Scheduler, reminders, automation rules
 - Email, calendar, notes, databases, Docker/K8s
 - Multi-agent (planner / coder / researcher)
-- Vision / OCR, streaming barge-in
+- Vision / OCR, streaming (turn-based) barge-in → done: local energy-based barge-in (`sopno/voice/barge.py`)
 - REST API, mobile companion
 
 ---
@@ -118,7 +118,7 @@ From `roadmap/features.md`, these major areas have **no implementation**:
 | Issue | Impact |
 |-------|--------|
 | GNOME-specific commands | Breaks on KDE, minimal WM, some Arch setups |
-| Blocking pipeline | No barge-in (interrupt while speaking) |
+| Blocking pipeline | Barge-in added (energy-based) — full turn-based; still sequential listen → think → speak |
 | TTS file-based | Temp wav/mp3 → `ffplay`; higher latency than streaming |
 | No permission gates | OS actions run without “ask first” |
 | Session-only memory | Forgets user after restart |
@@ -205,7 +205,7 @@ Sopno’s modular tool design means installing many packages does **not** multip
 2. Fix **doc/code drift** (README model name, wake-word diagram vs VAD loop)
 3. Add **permission prompts** for lock, volume, app launch
 4. **Streaming or lower-latency TTS** (Piper, edge-tts streaming, or chunked playback)
-5. **Barge-in** — stop TTS when user speaks
+5. ~~**Barge-in** — stop TTS when user speaks~~ ✅ done (energy-based, tunable in `config.json`)
 
 ### Phase B — Core agent power
 

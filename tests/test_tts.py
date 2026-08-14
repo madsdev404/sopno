@@ -37,11 +37,11 @@ class TestTTS(unittest.TestCase):
         engine = engine_name()
         if engine == "coqui":
             speak("Hello Test")
-            mock_coqui.assert_called_once_with("Hello Test")
+            mock_coqui.assert_called_once_with("Hello Test", should_stop=None, on_play_start=None)
             mock_gtts.assert_not_called()
         else:
             speak("Hello Test")
-            mock_gtts.assert_called_once_with("Hello Test")
+            mock_gtts.assert_called_once_with("Hello Test", should_stop=None, on_play_start=None)
             mock_coqui.assert_not_called()
 
 

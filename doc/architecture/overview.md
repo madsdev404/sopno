@@ -54,6 +54,7 @@ sopno/
 │   │   │   ├── 📄 scoring.py           ← Transcript scoring & audio sanity
 │   │   │   └── 📄 google.py            ← Online Google fallback engine
 │   │   └── 📄 tts.py                   ← Text-to-Speech (Coqui TTS / gTTS fallback)
+│   │   └── 📄 barge.py                 ← Barge-in: stop TTS when user starts talking
 │   │
 │   ├── 📁 llm/                         ← THE AI MODEL LAYER
 │   │   ├── 📄 __init__.py
@@ -61,30 +62,26 @@ sopno/
 │   │   └── 📄 summarizer.py            ← Compresses long conversation history
 │   │
 │   ├── 📁 tools/                       ← SKILLS: what Sopno can DO
-│   │   ├── 📄 __init__.py
+│   │   ├── 📄 __init__.py              ← Public API: execute_tool(), TOOLS_SCHEMA
 │   │   ├── 📄 registry.py              ← Maps tool names → functions (the dispatcher table)
 │   │   ├── 📄 schema.py                ← JSON schemas for LLM tool-calling API
-│   │   ├── 📄 system.py                ← OS tools: volume, lock screen, app launcher
-│   │   ├── 📄 search.py                ← Web search tool
-│   │   ├── 📄 datetime_tool.py         ← Date/time queries
-│   │   └── 📄 media.py                 ← Media playback controls
+│   │   └── 📁 builtins/                ← The skills themselves (one file each)
+│   │       ├── 📄 system.py            ← OS tools: volume, lock screen, app launcher
+│   │       ├── 📄 search.py            ← Web search tool
+│   │       ├── 📄 datetime_tool.py     ← Date/time queries
+│   │       └── 📄 media.py             ← Media playback controls
 │   │
 │   ├── 📁 ui/                          ← EVERYTHING VISIBLE
 │   │   ├── 📄 __init__.py
 │   │   ├── 📁 hud/                     ← PyQt5 glassmorphic HUD (was hud.py)
 │   │   │   ├── 📄 __init__.py          ← Public API: run_hud()
+│   │   │   ├── 📄 app.py               ← run_hud() + hot reload
 │   │   │   ├── 📄 window.py            ← SopnoHUDWindow layout + wiring
-│   │   │   ├── 📄 widgets.py           ← ModeToggle + ChatThread
-│   │   │   ├── 📄 robot.py             ← AliveRobotFace animation
 │   │   │   ├── 📄 worker.py            ← AssistantWorker signal bridge
-│   │   │   ├── 📄 theme.py             ← Size presets, status copy, QSS templates
-│   │   │   ├── 📄 icons.py             ← Vector icon painter
-│   │   │   ├── 📄 responsive.py        ← Responsive sizing mixin
-│   │   │   ├── 📄 resizing.py          ← Edge drag-resize mixin
-│   │   │   ├── 📄 tray.py              ← System tray mixin
-│   │   │   ├── 📄 chrome.py            ← Chrome / composer mixin
-│   │   │   ├── 📄 status.py            ← Status rendering mixin
-│   │   │   └── 📄 run.py               ← run_hud() + hot reload
+│   │   │   ├── 📁 behaviors/           ← Mixins: chrome, responsive, resizing,
+│   │   │   │                            status, tray
+│   │   │   ├── 📁 widgets/             ← Reusable widgets: robot, chat, mode_toggle
+│   │   │   └── 📁 visuals/             ← Look & feel: theme, icons
 │   │   └── 📄 cli.py                   ← Terminal-mode interface (no GUI)
 │   │
 │   └── 📁 config/                      ← SETTINGS & PROMPTS
@@ -182,7 +179,7 @@ sopno/core/dispatcher.py       ← Is this a TOOL call or a CHAT message?
 ```
 Want to change TTS engine?      → Only edit  sopno/voice/tts.py
 Want to change LLM model?       → Only edit  sopno/llm/client.py
-Want to add a new skill?        → Only add   sopno/tools/your_tool.py
+Want to add a new skill?        → Only add   sopno/tools/builtins/your_tool.py
                                    and register it in sopno/tools/registry.py
 Want to change Sopno's persona? → Only edit  prompts/system.txt
 Want to change UI layout?       → Only edit  sopno/ui/hud/window.py
@@ -196,7 +193,7 @@ Want to change UI layout?       → Only edit  sopno/ui/hud/window.py
 |---|---|
 | `sopno.py` | `sopno/core/assistant.py` + `sopno/core/dispatcher.py` + `main.py` |
 | `gui.py` | `sopno/ui/hud/` (was `sopno/ui/hud.py`) |
-| `tools.py` | `sopno/tools/system.py` + `sopno/tools/search.py` + `sopno/tools/datetime_tool.py` |
+| `tools.py` | `sopno/tools/builtins/` (skills) + `sopno/tools/registry.py` + `sopno/tools/schema.py` |
 | `tools_schema.py` | `sopno/tools/schema.py` |
 | `config.json` | root `config.json` (read via `sopno/config/settings.py`) |
 | `test_*.py` (root) | `tests/test_*.py` |

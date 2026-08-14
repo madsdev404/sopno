@@ -112,7 +112,8 @@ The heart of Sopno is an infinite loop in `SopnoAssistant.run()`
 8. THINK        LLM (Ollama) generates the reply
 9. CONTEXT      Reply stored in history → sopno/core/context.py
                 (auto-compresses when history gets too long)
-10. SPEAK       Reply synthesized → sopno/voice/tts.py
+10. SPEAK       Reply synthesized → sopno/voice/tts.py (barge-in: Sopno stops
+                talking if you start talking mid-reply → sopno/voice/barge.py)
 11. DISPLAY     Reply shown on the HUD / terminal → sopno/ui/
 12. LOOP        Back to step 2 (or exit on "goodbye" / "বিদায়")
 ```
@@ -192,7 +193,9 @@ CLI.
   `stt_model`, `stt_language`, `stt_online_fallback`, `stt_capture`,
   `listening_mode`, `wake_words`, `pause_threshold`, `phrase_threshold`,
   `energy_threshold_floor` / `energy_threshold_ceiling`,
-  `dynamic_energy_threshold`, `hud_opacity`, `hud_position`, `max_history_length`.
+  `dynamic_energy_threshold`, `barge_in_enabled` / `barge_in_baseline_s` /
+  `barge_in_multiplier` / `barge_in_margin` / `barge_in_confirm_ms`,
+  `hud_opacity`, `hud_position`, `max_history_length`.
 
 **`sopno/config/prompts.py`** — loads prompt text from `prompts/*.txt`.
 
@@ -232,6 +235,11 @@ This is the most important file in the project. It:
      low). If the model calls tools, each is executed and the results are fed back,
      then the model produces the final conversational reply.
   - Reply text is sanitized (markdown characters stripped) before speaking.
+- `_speak_with_barge_in(text)` — speaks a reply while a `BargeInMonitor` watches
+  the mic. If the user starts talking mid-reply, TTS stops immediately, the log
+  shows "Barge-in detected", and the loop returns to listening (skipping the
+  0.45s settle pause) so the user can speak right away. Disabled when
+  `barge_in_enabled` is `false`.
 
 **`sopno/core/context.py`** — conversation memory (`ConversationContext`).
 
@@ -329,8 +337,20 @@ This is the most important file in the project. It:
 - Engine priority: **Coqui TTS** (offline, neural, `your_tts` multilingual model,
   ~200 MB first-run download) → **gTTS** (online Google fallback).
 - `speak(text)` plays the audio with `ffplay` from a temp file and cleans up.
+- Playback is interruptible: `speak(text, should_stop=…, on_play_start=…)` polls
+  `should_stop()` during playback and cuts the audio short (used by barge-in).
 - `_is_bangla(text)` detects the Unicode Bangla range to pick `bn` vs `en` for gTTS.
 - `engine_name()` reports the active engine.
+
+**`sopno/voice/barge.py`** — barge-in (`BargeInMonitor`).
+
+- Lets you interrupt Sopno: while TTS plays, a background thread watches the mic.
+- `BargeDetector` (pure logic, unit-tested) first measures Sopno's *own* voice
+  during the first `barge_in_baseline_s`, then confirms an interrupt when the user
+  speaks above `max(floor, own_voice × barge_in_multiplier + margin)` for
+  `barge_in_confirm_ms`.
+- Degrades gracefully: if PyAudio or the mic is unavailable, playback just runs
+  to completion.
 
 ### 6.4 `llm/` — The AI Layer
 
@@ -371,30 +391,29 @@ the LLM (OpenAI-style `function` objects). It defines 7 tools:
 
 **`sopno/tools/registry.py`** — maps schema names → Python functions.
 
-- `_REGISTRY` dict (name → callable).
+- `_REGISTRY` dict (name → callable) importing each skill from `builtins/`.
 - `execute_tool(name, arguments)` — runs a registered tool, spreading the argument
   dict; wraps errors into friendly spoken strings.
 - `get_registered_names()` — list of registered tools.
 
-**`sopno/tools/system.py`** — OS-level tools.
+**`sopno/tools/builtins/`** — the skills themselves, one file per skill or small
+domain:
 
-- `open_application(app_name)` — launches apps via `subprocess.Popen` using the
-  `_APP_MAP` friendly-name → command table (chrome, firefox, files, terminal,
-  vscode, spotify, calculator, settings).
-- `control_volume(action)` — `amixer -D pulse sset Master 10%+/10%-/toggle`.
-- `get_system_stats()` — CPU% (`psutil.cpu_percent`), RAM GB used/total, battery
-  percent + charging status.
-- `lock_screen()` — `gnome-screensaver-command --lock`, falling back to
-  `loginctl lock-session`.
-
-**`sopno/tools/search.py`** — `search_web(query)` opens a Google search URL in the
-default browser via `webbrowser`.
-
-**`sopno/tools/datetime_tool.py`** — `get_current_time()` returns e.g.
-"It is 09:41 AM on Thursday, August 13."
-
-**`sopno/tools/media.py`** — `play_media_control(action)` controls media players via
-`playerctl` (MPRIS). Requires `playerctl` and a running media player.
+- **`system.py`** — OS-level tools.
+  - `open_application(app_name)` — launches apps via `subprocess.Popen` using the
+    `_APP_MAP` friendly-name → command table (chrome, firefox, files, terminal,
+    vscode, spotify, calculator, settings).
+  - `control_volume(action)` — `amixer -D pulse sset Master 10%+/10%-/toggle`.
+  - `get_system_stats()` — CPU% (`psutil.cpu_percent`), RAM GB used/total, battery
+    percent + charging status.
+  - `lock_screen()` — `gnome-screensaver-command --lock`, falling back to
+    `loginctl lock-session`.
+- **`search.py`** — `search_web(query)` opens a Google search URL in the default
+  browser via `webbrowser`.
+- **`datetime_tool.py`** — `get_current_time()` returns e.g.
+  "It is 09:41 AM on Thursday, August 13."
+- **`media.py`** — `play_media_control(action)` controls media players via
+  `playerctl` (MPRIS). Requires `playerctl` and a running media player.
 
 ### 6.6 `ui/` — What You See
 
@@ -403,13 +422,16 @@ default browser via `webbrowser`.
 - `run_cli()` creates `SopnoAssistant` with stdout/print callbacks so status,
   transcripts, and replies appear in the console. No GUI needed.
 
-**`sopno/ui/hud/`** — the PyQt5 glassmorphic HUD package.
+**`sopno/ui/hud/`** — the PyQt5 glassmorphic HUD package. Three layers: the
+entry/wiring at the top level, behaviors as mixins in `behaviors/`, reusable
+widgets in `widgets/`, and the look & feel in `visuals/`.
 
 - **`__init__.py`** — public API: re-exports `run_hud` and `SopnoHUDWindow`.
-- **`run.py`** — `run_hud(reload=False)`: builds the `QApplication`, sets the Fusion
-  style + global tooltip theme, optionally installs a hot-reload watcher
-  (`--reload` restarts the process when HUD files or `assistant.py`/`settings.py`
-  change), shows the window, and enters the Qt event loop.
+- **`app.py`** — `run_hud(reload=False)`: builds the `QApplication`, sets the
+  Fusion style + global tooltip theme, optionally installs a hot-reload watcher
+  (`--reload` restarts the process when any HUD file or `assistant.py` /
+  `settings.py` changes — it watches the whole package recursively), shows the
+  window, and enters the Qt event loop.
 - **`window.py`** — `SopnoHUDWindow` (the main frame). Frameless, always-on-top,
   translucent; builds the layout: header chrome (size buttons, hide, close), the
   animated robot face, status label + listening-mode chip, the chat thread, the
@@ -420,36 +442,40 @@ default browser via `webbrowser`.
   thread and Qt's signal/slot system. Emits `status_changed`, `speech_detected`,
   `reply_generated`, `log_message`; proxies mode / listen-mode / text input to the
   assistant.
-- **`widgets.py`** — two reusable widgets:
-  - `ModeToggle` — a segmented Voice | Text capsule control with vector icons.
-  - `ChatThread` — a scrolling conversation of message bubbles ("You" vs "Sopno"),
-    capped at 40 bubbles, auto-scrolls to bottom.
-- **`robot.py`** — `AliveRobotFace(QWidget)`: a parametric robot face painted in
-  `paintEvent`. It blinks, glances around, "breathes", opens its mouth when
-  speaking, and recolors per state (blue listening, purple thinking, green
-  speaking) using `STATE_ACCENT` colors. Runs on a ~30 fps `QTimer`.
-- **`theme.py`** — shared constants and QSS templates: `SIZE_PRESETS`
-  (small 280×360 / medium 380×560 / full 520×740), `MIN_SIZE` / `MAX_SIZE`,
-  `STATUS_COPY` (state → label + color), `STATE_ACCENT` (state → QColor), and CSS
-  templates for chrome buttons, tool icons, segment buttons, and circular buttons.
-- **`icons.py`** — `_paint_icon(kind, size, color, active)`: crisp vector glyphs
-  drawn with `QPainter` (mic, keyboard, send, size-small/medium/full) — no emoji.
-- **`responsive.py`** — `ResponsiveMixin`: maps panel width to a "metrics" dict
-  (fonts, icons, robot size, spacing, which rows are visible) and re-styles the HUD
-  when resized (`_apply_responsive`). `apply_size_preset(mode)` resizes to a preset
-  while keeping the panel on-screen.
-- **`resizing.py`** — `ResizeMixin`: 8-zone edge/corner hit-detection
-  (`_edge_at`), drag-to-resize with min/max enforcement, and plain window dragging
-  by the body. Sets the proper resize cursors.
-- **`tray.py`** — `TrayMixin`: system tray icon (a radial-gradient orb), context
-  menu (Show/Hide HUD, size presets, Exit), and click-to-toggle show/hide.
-- **`chrome.py`** — `ChromeMixin`: builds the window chrome buttons, the circular
-  icon buttons, the "🔔 Wake / 🎤 Always" listening-mode chip, and handles sending
-  typed text messages.
-- **`status.py`** — `StatusMixin`: renders assistant state onto the UI — updates
-  the status label + robot face color, the contextual hint label ("Say 'dream'…",
-  "Listening…", "Thinking…"), adds user/Sopno chat bubbles, and shows the latest
-  log line.
+- **`behaviors/`** — mixins that dress the window:
+  - **`chrome.py`** — `ChromeMixin`: builds the window chrome buttons, the circular
+    icon buttons, the "🔔 Wake / 🎤 Always" listening-mode chip, and handles
+    sending typed text messages.
+  - **`responsive.py`** — `ResponsiveMixin`: maps panel width to a "metrics" dict
+    (fonts, icons, robot size, spacing, which rows are visible) and re-styles the
+    HUD when resized (`_apply_responsive`). `apply_size_preset(mode)` resizes to a
+    preset while keeping the panel on-screen.
+  - **`resizing.py`** — `ResizeMixin`: 8-zone edge/corner hit-detection
+    (`_edge_at`), drag-to-resize with min/max enforcement, and plain window
+    dragging by the body. Sets the proper resize cursors.
+  - **`status.py`** — `StatusMixin`: renders assistant state onto the UI —
+    updates the status label + robot face color, the contextual hint label
+    ("Say 'dream'…", "Listening…", "Thinking…"), adds user/Sopno chat bubbles, and
+    shows the latest log line.
+  - **`tray.py`** — `TrayMixin`: system tray icon (a radial-gradient orb), context
+    menu (Show/Hide HUD, size presets, Exit), and click-to-toggle show/hide.
+- **`widgets/`** — self-contained reusable pieces:
+  - **`robot.py`** — `AliveRobotFace(QWidget)`: a parametric robot face painted in
+    `paintEvent`. It blinks, glances around, "breathes", opens its mouth when
+    speaking, and recolors per state (blue listening, purple thinking, green
+    speaking) using `STATE_ACCENT` colors. Runs on a ~30 fps `QTimer`.
+  - **`chat.py`** — `ChatThread`: a scrolling conversation of message bubbles
+    ("You" vs "Sopno"), capped at 40 bubbles, auto-scrolls to bottom.
+  - **`mode_toggle.py`** — `ModeToggle`: a segmented Voice | Text capsule control
+    with vector icons.
+- **`visuals/`** — the look & feel:
+  - **`theme.py`** — shared constants and QSS templates: `SIZE_PRESETS`
+    (small 280×360 / medium 380×560 / full 520×740), `MIN_SIZE` / `MAX_SIZE`,
+    `STATUS_COPY` (state → label + color), `STATE_ACCENT` (state → QColor), and
+    CSS templates for chrome buttons, tool icons, segment buttons, and circular
+    buttons.
+  - **`icons.py`** — `_paint_icon(kind, size, color, active)`: crisp vector glyphs
+    drawn with `QPainter` (mic, keyboard, send, size-small/medium/full) — no emoji.
 
 ---
 
@@ -546,6 +572,11 @@ All settings live in **`config.json`** at the repo root and are read by
 | `energy_threshold_floor` | `100` | Min mic energy to start a phrase |
 | `energy_threshold_ceiling` | `250` | Max clamped mic energy threshold |
 | `dynamic_energy_threshold` | `false` | SpeechRecognition auto-adjust (kept off) |
+| `barge_in_enabled` | `true` | Let the user interrupt TTS by talking (see `barge.py`) |
+| `barge_in_baseline_s` | `0.4` | Seconds of Sopno's own voice to measure as the baseline |
+| `barge_in_multiplier` | `1.7` | Interrupt threshold = `own_voice × this + margin` |
+| `barge_in_margin` | `30` | Extra energy above the baseline before an interrupt counts |
+| `barge_in_confirm_ms` | `180` | How long the user must stay above threshold to confirm |
 | `hud_opacity` | `0.85` | HUD background opacity |
 | `hud_position` | `top-right` | Where the HUD appears |
 | `max_history_length` | `13` | Message count that triggers history summarization |
@@ -557,8 +588,8 @@ All settings live in **`config.json`** at the repo root and are read by
 Because the project is modular, most changes are local and low-risk:
 
 **Add a new tool (skill)**
-1. Create `sopno/tools/your_tool.py` with a function that returns a short,
-   speakable string.
+1. Create `sopno/tools/builtins/your_tool.py` with a function that returns a
+   short, speakable string.
 2. Register it in `sopno/tools/registry.py` (`_REGISTRY`).
 3. Add its schema to `TOOLS_SCHEMA` in `sopno/tools/schema.py` so the LLM can call
    it.

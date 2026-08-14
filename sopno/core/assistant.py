@@ -24,6 +24,7 @@ from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import TOOLS_SCHEMA
 from sopno.tools.registry import execute_tool
+from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
@@ -245,12 +246,38 @@ class SopnoAssistant:
             self._wake_detector = WakeWordDetector(log_callback=self.on_log_message)
         return self._wake_detector
 
+    def _speak_with_barge_in(self, text: str) -> bool:
+        """
+        Speak while watching the mic; returns True if the user interrupted.
+
+        When the user starts talking mid-reply, TTS stops immediately so Sopno
+        can listen — no waiting for the sentence to finish.
+        """
+        if not getattr(settings, "barge_in_enabled", True):
+            speak(text)
+            return False
+
+        monitor = BargeInMonitor(log_callback=self.on_log_message)
+        monitor.start()
+        try:
+            speak(
+                text,
+                should_stop=lambda: monitor.interrupted,
+                on_play_start=monitor.start_measurement,
+            )
+        finally:
+            monitor.stop()
+        return monitor.interrupted
+
     def _deliver_reply(self, text: str, *, status: str = "speaking") -> None:
         """Show reply in UI; speak aloud only in voice mode."""
         self.on_reply_generated(text)
         if self.interaction_mode == "voice":
             self.on_status_changed(status)
-            speak(text)
+            if self._speak_with_barge_in(text):
+                self.on_log_message("Barge-in detected — stopped speaking.")
+                self.on_status_changed("listening")
+                return
             time.sleep(_POST_SPEAK_SETTLE_S)
         else:
             # Text mode: brief "speaking" flash for avatar, no TTS

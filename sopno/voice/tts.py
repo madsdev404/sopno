@@ -16,6 +16,7 @@ import os
 import re
 import subprocess
 import tempfile
+from typing import Callable, Optional
 
 # ── Engine detection ───────────────────────────────────────────────────────────
 try:
@@ -32,7 +33,46 @@ def _is_bangla(text: str) -> bool:
     return bool(re.search(r'[\u0980-\u09FF]', text))
 
 
-def _speak_coqui(text: str) -> None:
+def _play_audio(
+    path: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_play_start: Optional[Callable[[], None]] = None,
+) -> None:
+    """
+    Play a media file with ffplay, stopping early if ``should_stop()`` turns True.
+
+    ``on_play_start()`` fires right after playback begins — used by the
+    barge-in monitor to start measuring the assistant's own voice.
+    """
+    proc = subprocess.Popen(
+        ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", path]
+    )
+    if on_play_start is not None:
+        on_play_start()
+
+    if should_stop is None:
+        proc.wait()
+        return
+
+    while proc.poll() is None:
+        if should_stop():
+            proc.terminate()
+            try:
+                proc.wait(timeout=2.0)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+            return
+        try:
+            proc.wait(timeout=0.1)
+        except subprocess.TimeoutExpired:
+            pass
+
+
+def _speak_coqui(
+    text: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_play_start: Optional[Callable[[], None]] = None,
+) -> None:
     """Synthesize speech offline using Coqui TTS (neural, best quality)."""
     global _coqui_instance
     if _coqui_instance is None:
@@ -48,10 +88,7 @@ def _speak_coqui(text: str) -> None:
 
     try:
         _coqui_instance.tts_to_file(text=text, file_path=tmp_path)
-        subprocess.run(
-            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", tmp_path],
-            check=False,
-        )
+        _play_audio(tmp_path, should_stop=should_stop, on_play_start=on_play_start)
     finally:
         try:
             os.remove(tmp_path)
@@ -59,7 +96,11 @@ def _speak_coqui(text: str) -> None:
             pass
 
 
-def _speak_gtts(text: str) -> None:
+def _speak_gtts(
+    text: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_play_start: Optional[Callable[[], None]] = None,
+) -> None:
     """Synthesize speech online using gTTS (Google TTS fallback)."""
     from gtts import gTTS
 
@@ -70,10 +111,7 @@ def _speak_gtts(text: str) -> None:
 
     try:
         gTTS(text=text, lang=lang).save(tmp_path)
-        subprocess.run(
-            ["ffplay", "-nodisp", "-autoexit", "-loglevel", "quiet", tmp_path],
-            check=False,
-        )
+        _play_audio(tmp_path, should_stop=should_stop, on_play_start=on_play_start)
     finally:
         try:
             os.remove(tmp_path)
@@ -83,24 +121,31 @@ def _speak_gtts(text: str) -> None:
 
 # ── Public API ─────────────────────────────────────────────────────────────────
 
-def speak(text: str) -> None:
+def speak(
+    text: str,
+    should_stop: Optional[Callable[[], bool]] = None,
+    on_play_start: Optional[Callable[[], None]] = None,
+) -> None:
     """
     Speak the given text aloud.
 
     Uses Coqui TTS (offline) if available, otherwise falls back to gTTS (online).
     Automatically detects Bangla vs English for the fallback engine.
+
+    ``should_stop`` is polled during playback — returning True cuts the audio
+    short (used for barge-in). ``on_play_start`` fires once playback begins.
     """
     if not text or not text.strip():
         return
 
     if _ENGINE == "coqui":
         try:
-            _speak_coqui(text)
+            _speak_coqui(text, should_stop=should_stop, on_play_start=on_play_start)
             return
         except Exception as e:
             print(f"[TTS] Coqui failed ({e}), falling back to gTTS.")
 
-    _speak_gtts(text)
+    _speak_gtts(text, should_stop=should_stop, on_play_start=on_play_start)
 
 
 def engine_name() -> str:

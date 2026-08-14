@@ -70,6 +70,17 @@ class Settings:
             data.get("dynamic_energy_threshold", False)
         )
 
+        # ── Barge-in ─────────────────────────────────────────
+        # Stop talking the moment the user starts talking.
+        self.barge_in_enabled: bool = bool(data.get("barge_in_enabled", True))
+        # Seconds of Sopno's own voice measured at playback start (the baseline).
+        self.barge_in_baseline_s: float = float(data.get("barge_in_baseline_s", 0.4))
+        # User speech must exceed own_voice * multiplier + margin to count.
+        self.barge_in_multiplier: float = float(data.get("barge_in_multiplier", 1.7))
+        self.barge_in_margin: float = float(data.get("barge_in_margin", 30))
+        # How long user speech must persist before interrupting (debounce).
+        self.barge_in_confirm_ms: float = float(data.get("barge_in_confirm_ms", 180))
+
         # ── HUD ───────────────────────────────────────────────
         self.hud_opacity: float     = data.get("hud_opacity", 0.85)
         self.hud_position: str      = data.get("hud_position", "top-right")

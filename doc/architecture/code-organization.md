@@ -128,16 +128,25 @@ files now:
 
 | File | Lines | Verdict |
 |------|------:|---------|
-| `sopno/core/assistant.py` | 390 | 🟢 within limit |
+| `sopno/core/assistant.py` | ~606 | 🟡 grew with barge-in; split if it passes ~700 |
 | `sopno/ui/hud/window.py` | 321 | 🟢 ok |
-| `sopno/ui/hud/widgets.py` | 274 | 🟢 ok |
-| `sopno/ui/hud/robot.py` | 233 | 🟢 ok |
+| `sopno/ui/hud/widgets/robot.py` | 233 | 🟢 ok |
+| `sopno/ui/hud/widgets/chat.py` | ~170 | 🟢 ok |
+| `sopno/ui/hud/behaviors/chrome.py` | ~100 | 🟢 ok |
 | `sopno/voice/stt/whisper.py` | 206 | 🟢 ok |
+| `sopno/voice/barge.py` | ~130 | 🟢 ok |
 | everything else | ≤ 155 | 🟢 ok |
+
+The hud migration below is **✅ done** (see `doc/roadmap/status.md` Step 7):
+hud now lives in `behaviors/` + `widgets/` + `visuals/` subfolders, and the
+hot-reload watcher watches the whole package via `rglob("*.py")`.
 
 ---
 
 ## 4. Migration plan — `sopno/ui/hud.py` (1509 lines)
+
+> **Status: ✅ completed** (2026-08-14). Kept below for reference; the live
+> structure is described in `doc/CODEBASE.md` §6.6.
 
 ### 4.1 What it actually contains
 

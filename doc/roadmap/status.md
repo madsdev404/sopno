@@ -49,6 +49,15 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📓 Technical Progress Log
 
+### [August 14, 2026] — Step 9: Barge-In (Interruptible Voice)
+* **Added Files:** `sopno/voice/barge.py`, `tests/test_barge.py`
+* **Modified Files:** `sopno/voice/tts.py`, `sopno/core/assistant.py`, `sopno/config/settings.py`, `config.json`, `tests/test_tts.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno now stops speaking the moment you start talking and returns to listening (no settle pause). `BargeInMonitor` measures Sopno's own voice for 0.4s, then flags an interrupt when the user speaks above `own_voice × 1.7 + 30` for 180ms — all tunable in `config.json`. Graceful degradation if PyAudio/mic is missing.
+
+### [August 14, 2026] — Step 7: Clean Folder Organization (HUD + Tools)
+* **Modified Files:** `sopno/ui/hud/` (reorganized), `sopno/tools/` (reorganized)
+* **Impact:** HUD package split into `behaviors/` (5 mixins), `widgets/` (robot, chat, mode_toggle), `visuals/` (theme, icons); `run.py` renamed `app.py`; hot-reload watcher now uses `rglob("*.py")`. Tools split into a framework (`registry.py` + `schema.py` stay top-level) + `tools/builtins/` for skills. Public APIs preserved (`sopno.ui.hud.run_hud`, `sopno.tools.execute_tool`).
+
 ### [July 20, 2026] — Finalization of Offline TTS & Daemon
 * **Modified Files:** `sopno.py`, `install_daemon.sh`, `doc/ROADMAP_STATUS.md`
 * **Added Files:** `.config/autostart/sopno_hud.desktop`

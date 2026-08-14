@@ -709,7 +709,7 @@ nano ~/.config/autostart/sopno-hud.desktop
 [Desktop Entry]
 Type=Application
 Name=Sopno HUD
-Exec=/home/YOUR_USERNAME/Projects/sopno/venv/bin/python3 /home/YOUR_USERNAME/Projects/sopno/hud.py
+Exec=/home/YOUR_USERNAME/Projects/sopno/venv/bin/python3 /home/YOUR_USERNAME/Projects/sopno/main.py --hud
 Hidden=false
 NoDisplay=false
 X-GNOME-Autostart-enabled=true
