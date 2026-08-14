@@ -293,9 +293,9 @@ so memory never degrades conversation quality.
 
 | Phase | Scope | Status |
 |---|---|---|
-| **P0** | `sopno/memory/store.py` schema + CRUD + FTS5, `test_memory.py` | ⬜ Planned |
-| **P1** | Wire into `assistant.py` (remember/forget/recall commands, EN+BN), confirm replies | ⬜ Planned |
-| **P2** | `context.py` memory injection + token guard, `config.json` keys | ⬜ Planned |
+| **P0** | `sopno/memory/store.py` schema + CRUD + FTS5, `test_memory.py` | ✅ Completed |
+| **P1** | Wire into `assistant.py` (remember/forget/recall commands, EN+BN), confirm replies | ✅ Completed |
+| **P2** | `context.py` memory injection + token guard, `config.json` keys | ✅ Completed |
 | **P3** | LLM tool-call path (`remember`/`forget` tools in `TOOLS_SCHEMA`) | ⬜ Planned |
 | **P4** | `sqlite-vec` semantic recall — auto-retrieve "similar" memories without explicit tags | 🔮 Future |
 | **P5** | Learning system (features.md §35) — Sopno recalls corrections/preferences on its own | 🔮 Future |
@@ -320,4 +320,4 @@ so memory never degrades conversation quality.
 
 *Document created: August 13, 2026*  
 *Author: MD. Abduss Sobhan with AI assistant*  
-*Status: Design spec — implementation pending*
+*Status: P0–P2 implemented (store, commands, context injection); P3+ pending*

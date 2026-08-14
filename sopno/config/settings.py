@@ -78,6 +78,17 @@ class Settings:
         # 1 system prompt + 6 complete turns (12 messages) = 13 before summarization
         self.max_history_length: int = data.get("max_history_length", 13)
 
+        # ── Memory ────────────────────────────────────────────
+        # Persistent long-term memory (SQLite). Relative paths resolve to project root.
+        self.memory_path: Path = Path(data.get("memory_path", "sopno/memory/memory.db"))
+        if not self.memory_path.is_absolute():
+            self.memory_path = _PROJECT_ROOT / self.memory_path
+        # Token budget for the [Memories] block injected into the LLM prompt.
+        # Protects the small num_ctx window (2048) from memory bloat.
+        self.memory_max_tokens: int = int(data.get("memory_max_tokens", 400))
+        # How many memories are injected / recalled per turn.
+        self.memory_recall_limit: int = int(data.get("memory_recall_limit", 8))
+
         # ── Paths ─────────────────────────────────────────────
         self.project_root: Path     = _PROJECT_ROOT
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"

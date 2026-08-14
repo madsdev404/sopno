@@ -18,5 +18,8 @@
   "energy_threshold_ceiling": 250,
   "dynamic_energy_threshold": false,
   "hud_opacity": 0.85,
-  "hud_position": "top-right"
+  "hud_position": "top-right",
+  "memory_path": "sopno/memory/memory.db",
+  "memory_max_tokens": 400,
+  "memory_recall_limit": 8
 }

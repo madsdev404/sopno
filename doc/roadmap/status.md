@@ -38,10 +38,10 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Core Functions:** Time/date, open apps, volume adjust, media controls, system stats, lock screen.
 * [x] **CLI Sync:** Tool calling works on the terminal interface (`sopno.py`) as well as the GUI.
 
-### 6. Long-Term Memory (SQLite) — **[PLANNED]**
-* [ ] **SQLite Memory Store:** Persistent long-term memory in `sopno/memory/store.py` (schema, CRUD, FTS5 search) — survives restarts.
-* [ ] **"Remember" Commands:** "remember that X", "forget X", "what do you remember?" in English and Bangla.
-* [ ] **Context Injection:** Relevant memories injected into the LLM prompt with a token-budget guard.
+### 6. Long-Term Memory (SQLite) — **[PARTIALLY COMPLETED]**
+* [x] **SQLite Memory Store:** Persistent long-term memory in `sopno/memory/store.py` (schema, CRUD, FTS5 search) — survives restarts.
+* [x] **"Remember" Commands:** "remember that X", "forget X", "what do you remember?" in English and Bangla.
+* [x] **Context Injection:** Relevant memories injected into the LLM prompt with a token-budget guard.
 * [ ] **Semantic Recall (future):** `sqlite-vec` embeddings for automatic similarity-based recall.
 * Design spec: [modules/memory/memory.md](../modules/memory/memory.md)
 
@@ -72,4 +72,9 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ### [July 28, 2026] — Step 5: Wired Wake Word into Main Loop
 * **Modified Files:** `assistant.py`, `config.json`, `settings.py`, `hud.py`, `cli.py`, `tests/test_wakeword.py`, `doc/roadmap/status.md`
 * **Impact:** Wake word detection is now fully integrated into the assistant pipeline. Added `listening_mode` config option ("wake_word" or "always_on") to choose between gated wake-word activation and continuous VAD listening. HUD shows "Say 'Sopno'…" in wake_word standby; CLI banner reflects active mode. Added unit tests for `WakeWordDetector`.
+
+### [August 13, 2026] — Step 6: SQLite Long-Term Memory
+* **Added Files:** `sopno/memory/store.py`, `sopno/memory/__init__.py`, `tests/test_memory.py`, `doc/modules/memory/memory.md`
+* **Modified Files:** `sopno/core/assistant.py`, `sopno/core/context.py`, `sopno/config/settings.py`, `config.json`, `.gitignore`, `doc/README.md`, `doc/roadmap/status.md`
+* **Impact:** Sopno now has human-like long-term memory. Facts are persisted to a SQLite DB (FTS5 search index, importance/recency ranking, soft-delete) and survive restarts. New bilingual commands: "remember that X" / "মনে রাখো X", "forget X" / "ভুলে যাও X", "what do you remember?" / "কী মনে আছে", plus "forget everything". Memories are injected into the LLM prompt via `context.py` with a token-budget guard (`memory_max_tokens`).
 
