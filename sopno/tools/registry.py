@@ -13,6 +13,7 @@ from sopno.tools.builtins.system import open_application, control_volume, get_sy
 from sopno.tools.builtins.search import search_web, fetch_url
 from sopno.tools.builtins.datetime_tool import get_current_time
 from sopno.tools.builtins.media import play_media_control
+from sopno.llm.researcher import research
 
 
 # Map schema tool names to Python functions
@@ -25,6 +26,7 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "get_system_stats": get_system_stats,
     "lock_screen": lock_screen,
     "play_media_control": play_media_control,
+    "research": research,
 }
 
 

@@ -3,16 +3,22 @@ sopno/tools/builtins/search.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Web tools — real internet access.
 
-  - search_web  → run a web search and return the top results (title, url, snippet)
-  - fetch_url   → download a URL and return its readable text / content
+  - web_search   → structured results (title, url, snippet) merged from
+                   Bing (scraped) and DuckDuckGo (ddgs) — both free, no keys
+  - search_web   → spoken wrapper around web_search (the registered tool)
+  - fetch_page_text → download a URL and return readable text (trafilatura
+                   preferred, stdlib HTMLParser fallback)
+  - fetch_url    → spoken wrapper around fetch_page_text (the registered tool)
 
-Both use only the standard library for parsing, so no extra dependency
-beyond ``requests`` is required.
+Parsing uses only the standard library; page extraction prefers the free
+``trafilatura`` package and degrades to stdlib HTMLParser if it is absent.
 """
 
 import base64
+import html
 import re
 from html.parser import HTMLParser
+from typing import Optional
 from urllib.parse import parse_qs, urlparse
 
 import requests
@@ -22,7 +28,6 @@ USER_AGENT = (
 )
 _TIMEOUT_S = 15
 _MAX_FETCH_CHARS = 8000
-_MAX_SEARCH_RESULTS = 5
 
 
 # ── HTML → text helpers ──────────────────────────────────────────────────────
@@ -56,12 +61,48 @@ class _TextExtractor(HTMLParser):
         return " ".join("".join(self._parts).split())
 
 
+def extract_text(html: str) -> str:
+    """Return readable text from raw HTML (stdlib fallback)."""
+    parser = _TextExtractor()
+    try:
+        parser.feed(html)
+    except Exception:
+        return ""
+    return parser.text()
+
+
+def extract_text_rich(raw_html: str) -> str:
+    """
+    Return clean, boilerplate-free text from raw HTML.
+
+    Uses trafilatura when installed (best-in-class for articles/news); falls
+    back to the stdlib parser otherwise.
+    """
+    try:
+        import trafilatura
+    except Exception:
+        return extract_text(raw_html)
+    try:
+        text = trafilatura.extract(
+            raw_html,
+            include_comments=False,
+            include_tables=True,
+            favor_recall=True,
+        )
+    except Exception:
+        text = None
+    if not (text or "").strip():
+        return extract_text(raw_html)
+    return " ".join(text.split())
+
+
+# ── Bing parsing ─────────────────────────────────────────────────────────────
+
 class _BingParser(HTMLParser):
     """Parse Bing search result pages (``li.b_algo`` entries)."""
 
     def __init__(self, max_results: int) -> None:
         super().__init__()
-        self._max = max_results
         self.results: list[tuple[str, str, str]] = []
         self._depth = 0            # nesting depth inside li.b_algo
         self._in_anchor = False
@@ -132,19 +173,87 @@ def _bing_real_url(href: str) -> str:
         return href
 
 
-def extract_text(html: str) -> str:
-    """Return the readable text of an HTML document, whitespace-normalized."""
-    parser = _TextExtractor()
-    try:
-        parser.feed(html)
-    except Exception:
-        return ""
-    return parser.text()
+# ── Engines ──────────────────────────────────────────────────────────────────
+
+def _bing_results(query: str, max_results: int) -> list[dict]:
+    resp = requests.get(
+        "https://www.bing.com/search",
+        params={"q": query},
+        headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        timeout=_TIMEOUT_S,
+    )
+    resp.raise_for_status()
+    parser = _BingParser(max_results)
+    parser.feed(resp.text)
+    return [
+        {"title": title, "url": url, "snippet": snippet}
+        for title, url, snippet in parser.results[:max_results]
+    ]
 
 
-# ── Tools ────────────────────────────────────────────────────────────────────
+def _ddg_results(query: str, max_results: int) -> list[dict]:
+    from ddgs import DDGS
 
-def search_web(query: str, max_results: int = _MAX_SEARCH_RESULTS) -> str:
+    with DDGS() as ddgs:
+        results = list(ddgs.text(query, max_results=max_results, safesearch="moderate"))
+    out: list[dict] = []
+    for r in results or []:
+        title = html.unescape(str(r.get("title") or "")).strip()
+        url = str(r.get("href") or "").strip()
+        snippet = html.unescape(str(r.get("body") or "")).strip()
+        if title and url:
+            out.append({"title": title, "url": url, "snippet": snippet})
+    return out[:max_results]
+
+
+def web_search(
+    query: str,
+    max_results: int = 5,
+    engines: tuple[str, ...] = ("bing", "ddg"),
+) -> list[dict]:
+    """
+    Search the web across free engines and return merged, deduplicated results.
+
+    Args:
+        query: The search query string.
+        max_results: How many results to keep (1-10).
+        engines: Which engines to try, in order ("bing", "ddg").
+
+    Returns:
+        List of {"title", "url", "snippet"} dicts, URL-deduplicated.
+    """
+    query = (query or "").strip()
+    if not query:
+        return []
+    max_results = max(1, min(int(max_results), 10))
+
+    merged: list[dict] = []
+    seen: set[str] = set()
+    per_engine = max(2, max_results)
+
+    for engine in engines:
+        try:
+            if engine == "bing":
+                results = _bing_results(query, per_engine)
+            elif engine == "ddg":
+                results = _ddg_results(query, per_engine)
+            else:
+                continue
+        except Exception:
+            continue
+        for r in results:
+            url = r["url"]
+            if url in seen:
+                continue
+            seen.add(url)
+            merged.append(r)
+        if len(merged) >= max_results:
+            break
+
+    return merged[:max_results]
+
+
+def search_web(query: str, max_results: int = 5) -> str:
     """
     Search the web and return the top matching results.
 
@@ -158,35 +267,61 @@ def search_web(query: str, max_results: int = _MAX_SEARCH_RESULTS) -> str:
     query = (query or "").strip()
     if not query:
         return "Please provide a search query."
-    max_results = max(1, min(int(max_results or _MAX_SEARCH_RESULTS), 10))
 
-    try:
-        resp = requests.get(
-            "https://www.bing.com/search",
-            params={"q": query},
-            headers={
-                "User-Agent": USER_AGENT,
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-    except Exception as e:
-        return f"Web search failed: {e}"
-
-    parser = _BingParser(max_results)
-    parser.feed(resp.text)
-
-    results = parser.results[:max_results]
+    results = web_search(query, max_results=max_results)
     if not results:
         return f"I couldn't find any results for {query}."
 
     lines = [f"Top {len(results)} results for {query}:"]
-    for i, (title, url, snippet) in enumerate(results, 1):
-        lines.append(f"{i}. {title}. {url}")
-        if snippet:
-            lines.append(f"   {snippet}")
+    for i, r in enumerate(results, 1):
+        lines.append(f"{i}. {r['title']}. {r['url']}")
+        if r.get("snippet"):
+            lines.append(f"   {r['snippet']}")
     return "\n".join(lines)
+
+
+# ── Page fetching ────────────────────────────────────────────────────────────
+
+def fetch_page_text(url: str, max_chars: Optional[int] = None) -> str:
+    """
+    Download a URL and return its readable text.
+
+    Args:
+        url: The URL to fetch (http/https). A bare domain is accepted.
+        max_chars: Optional truncation limit.
+
+    Returns:
+        The page's clean text, or an empty string on any failure.
+    """
+    url = (url or "").strip()
+    if not url:
+        return ""
+    if not url.startswith(("http://", "https://")):
+        url = "https://" + url
+
+    try:
+        resp = requests.get(
+            url,
+            headers={"User-Agent": USER_AGENT},
+            timeout=_TIMEOUT_S,
+        )
+        resp.raise_for_status()
+    except Exception:
+        return ""
+
+    content_type = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
+
+    if content_type in ("application/json", "text/plain", "application/rss+xml",
+                        "application/atom+xml", "application/xml", "text/xml"):
+        text = resp.text.strip()
+    else:
+        text = extract_text_rich(resp.text)
+
+    if not text:
+        return ""
+    if max_chars and len(text) > max_chars:
+        text = text[:max_chars].rsplit(" ", 1)[0] + "…"
+    return text
 
 
 def fetch_url(url: str) -> str:
@@ -202,30 +337,8 @@ def fetch_url(url: str) -> str:
     url = (url or "").strip()
     if not url:
         return "Please provide a URL to fetch."
-    if not url.startswith(("http://", "https://")):
-        url = "https://" + url
 
-    try:
-        resp = requests.get(
-            url,
-            headers={"User-Agent": USER_AGENT},
-            timeout=_TIMEOUT_S,
-        )
-        resp.raise_for_status()
-    except Exception as e:
-        return f"Could not fetch {url}: {e}"
-
-    content_type = resp.headers.get("Content-Type", "").split(";")[0].strip().lower()
-
-    # Plain text / JSON / feeds → return raw body; HTML → extract readable text
-    if content_type in ("application/json", "text/plain", "application/rss+xml",
-                        "application/atom+xml", "application/xml", "text/xml"):
-        text = resp.text.strip()
-    else:
-        text = extract_text(resp.text)
-
+    text = fetch_page_text(url, max_chars=_MAX_FETCH_CHARS)
     if not text:
-        return f"The page at {url} had no readable text."
-    if len(text) > _MAX_FETCH_CHARS:
-        text = text[:_MAX_FETCH_CHARS] + "…"
+        return f"Could not fetch readable content from {url}."
     return text

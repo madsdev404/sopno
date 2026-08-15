@@ -20,6 +20,9 @@ PyQt5
 
 # Internet / web tools
 requests
+ddgs
+trafilatura
+sqlite-vec
 
 # System & Diagnostics skills
 psutil

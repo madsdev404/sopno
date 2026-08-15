@@ -100,6 +100,22 @@ class Settings:
         # How many memories are injected / recalled per turn.
         self.memory_recall_limit: int = int(data.get("memory_recall_limit", 8))
 
+        # ── Research (RAG) ────────────────────────────────────
+        # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
+        self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")
+        # How many web pages to read per research run (1-10).
+        self.research_max_pages: int = int(data.get("research_max_pages", 6))
+        # Cap per-page characters read from each fetched page.
+        self.research_page_chars: int = int(data.get("research_page_chars", 20000))
+        # Chunk size (chars) for embedding/indexing page text.
+        self.research_chunk_chars: int = int(data.get("research_chunk_chars", 1800))
+        # How many passages the summarizer sees (top-k retrieval).
+        self.research_top_k: int = int(data.get("research_top_k", 6))
+        # Summary length budget (tokens) for the research answer.
+        self.research_summary_tokens: int = int(data.get("research_summary_tokens", 800))
+        # Context window for the summarization call (chunks are large).
+        self.research_summary_ctx: int = int(data.get("research_summary_ctx", 8192))
+
         # ── Paths ─────────────────────────────────────────────
         self.project_root: Path     = _PROJECT_ROOT
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"

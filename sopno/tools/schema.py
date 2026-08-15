@@ -74,6 +74,23 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "research",
+            "description": "Research a question in depth across the web and return a complete, cited answer (uses multiple search engines and reads several full pages).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The question to research, phrased as a full question (e.g., 'What is the latest Linux kernel release?')."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "control_volume",
             "description": "Control the PC speaker volume (up to raise, down to lower, toggle to mute/unmute).",
             "parameters": {

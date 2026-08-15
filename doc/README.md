@@ -34,6 +34,7 @@ Docs for specific packages (mirrors `sopno/`):
 |--------|-----|
 | voice | [tts.md](modules/voice/tts.md) |
 | memory | [memory.md](modules/memory/memory.md) |
+| internet | [internet.md](modules/internet/internet.md) |
 
 ---
 
@@ -47,5 +48,6 @@ doc/
 ├── roadmap/
 └── modules/
     ├── voice/
-    └── memory/
+    ├── memory/
+    └── internet/
 ```

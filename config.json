@@ -26,5 +26,12 @@
   "hud_position": "top-right",
   "memory_path": "sopno/memory/memory.db",
   "memory_max_tokens": 400,
-  "memory_recall_limit": 8
+  "memory_recall_limit": 8,
+  "research_embed_model": "nomic-embed-text",
+  "research_max_pages": 6,
+  "research_page_chars": 20000,
+  "research_chunk_chars": 1800,
+  "research_top_k": 6,
+  "research_summary_tokens": 800,
+  "research_summary_ctx": 8192
 }
