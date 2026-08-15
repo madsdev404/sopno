@@ -41,7 +41,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "search_web",
-            "description": "Search Google for a query in the default web browser.",
+            "description": "Search the web for a query and return the top results with titles, URLs, and snippets.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -51,6 +51,23 @@ TOOLS_SCHEMA = [
                     }
                 },
                 "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "fetch_url",
+            "description": "Fetch a webpage or URL and return its readable text content.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to fetch (e.g. https://en.wikipedia.org/wiki/Python_(programming_language))."
+                    }
+                },
+                "required": ["url"]
             }
         }
     },

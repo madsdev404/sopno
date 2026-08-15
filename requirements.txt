@@ -18,5 +18,8 @@ numpy
 # GUI Dashboard & Overlays
 PyQt5
 
+# Internet / web tools
+requests
+
 # System & Diagnostics skills
 psutil

@@ -38,6 +38,7 @@ _TOOLISH = re.compile(
     r"play|pause|resume|next|previous|skip|"
     r"time|date|clock|battery|cpu|ram|memory|stats|status|system|"
     r"media|music|song|spotify|browser|chrome|firefox|vscode|terminal|"
+    r"fetch|read|url|web|website|site|page|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ"
     r")\b",
     re.IGNORECASE,
