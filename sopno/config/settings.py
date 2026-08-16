@@ -171,6 +171,12 @@ class Settings:
         # Ask Yes/No before every write, edit, delete, and rename.
         self.file_confirm_writes: bool = bool(data.get("file_confirm_writes", True))
 
+        # ── Git ───────────────────────────────────────────────
+        # Master switch for the git tools.
+        self.git_enabled: bool = bool(data.get("git_enabled", True))
+        # Diff/status output shown to the LLM per call (tail kept when longer).
+        self.git_max_diff_chars: int = int(data.get("git_max_diff_chars", 12000))
+
         # ── Paths ─────────────────────────────────────────────
         self.project_root: Path     = _PROJECT_ROOT
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"

@@ -47,6 +47,7 @@ _TOOLISH = re.compile(
     r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
     r"service|cron|log|journal|systemctl|ps aux|list processes|"
     r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes?|"
+    r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",
     re.IGNORECASE,

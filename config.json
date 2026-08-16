@@ -61,5 +61,7 @@
   ],
   "file_max_size_bytes": 2000000,
   "file_output_chars": 6000,
-  "file_confirm_writes": true
+  "file_confirm_writes": true,
+  "git_enabled": true,
+  "git_max_diff_chars": 12000
 }

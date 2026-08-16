@@ -383,6 +383,184 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "git_status",
+            "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_log",
+            "description": "Show recent git commits, one line each.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Number of commits to show (1-50, default 10)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_diff",
+            "description": "Show the working-tree diff of a git repository, or only the staged changes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "staged": {
+                        "type": "boolean",
+                        "description": "True to show only staged (index) changes."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_branch",
+            "description": "List, create, switch, or delete git branches. Deleting needs the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "create", "switch", "delete"],
+                        "description": "What to do (default 'list')."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Branch name for create / switch / delete."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_add",
+            "description": "Stage files for the next commit (needs the user's confirmation).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "paths": {
+                        "type": "string",
+                        "description": "One or more space-separated paths to stage (default '.' stages everything)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit",
+            "description": "Create a git commit with the given message (needs the user's confirmation). Use git_commit_message to draft a message first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "The commit message."
+                    },
+                    "add_all": {
+                        "type": "boolean",
+                        "description": "Also stage all changes (git add -A) before committing."
+                    }
+                },
+                "required": ["message"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_stash",
+            "description": "List, push, or pop git stashes. Push and pop need the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "push", "pop"],
+                        "description": "What to do (default 'list')."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Optional note for a stash push."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "git_commit_message",
+            "description": "Ask the local LLM to draft a conventional commit message from the current diff. Read-only — nothing is staged or committed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "repo": {
+                        "type": "string",
+                        "description": "Optional absolute path of the repository (defaults to the project root)."
+                    },
+                    "staged": {
+                        "type": "boolean",
+                        "description": "True (default) to use the staged diff, else the unstaged one."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "control_volume",
             "description": "Control the PC speaker volume (up to raise, down to lower, toggle to mute/unmute).",
             "parameters": {

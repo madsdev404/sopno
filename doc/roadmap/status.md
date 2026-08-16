@@ -67,9 +67,20 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Symlink-Safe Paths:** every path is `resolve()`d before checking, so `..`/symlinks can't escape the roots.
 * [x] **HUD/CLI Confirmation:** every write/edit/delete/rename parks a pending action and asks the user Yes/No (spoken in voice mode, typed in text mode); `file_confirm_writes` can disable the prompt.
 
+### 10. Git Tools — **[COMPLETED]**
+* [x] **Read-Only Tools:** `git_status` (branch + working-tree + recent history), `git_log` (one-line history, clamped), `git_diff` (unstaged or staged, capped), `git_commit_message` (LLM-drafts a conventional message from the diff — read-only).
+* [x] **Branch Tools:** `git_branch` list / create / switch / delete (delete confirmed, `branch -d` only — never force).
+* [x] **Mutating Tools (Confirmed):** `git_add` (stage files), `git_commit` (optional `add_all`), `git_stash` push/pop — all park a pending action and ask the user Yes/No.
+* [x] **Safe by Construction:** every command runs through the persistent terminal session (`git -C <repo> -c color.ui=false …`), so the terminal blocklist applies; interpolated values are shlex-quoted and checked against shell metacharacters; repo/branch/path names are validated; `git_enabled` master switch in `config.json`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 13: Git Tools
+* **Added Files:** `sopno/tools/builtins/git.py`, `tests/test_git.py`
+* **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/config/settings.py`, `config.json`, `sopno/tools/builtins/__init__.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now work with git repositories end to end. Read-only tools cover status, log, and diff (diff capped by `git_max_diff_chars`, ANSI/OSC control marks stripped for clean LLM output). `git_branch` handles list/create/switch/delete, `git_add` stages files, `git_commit` creates commits (optionally after `git add -A`), and `git_stash` pushes/pops. Every mutating tool reuses the pending-action Yes/No gate from the file tools (`_awaiting_confirmation` / `resolve_pending` in `core/assistant.py`), so nothing is staged, committed, deleted, or stashed without the user's OK. `git_commit_message` is read-only and asks the local LLM for a conventional `type(scope): summary` message from the diff. All commands run through the persistent terminal session (`git -C <repo> …`) so the terminal blocklist and privileges apply; values are shlex-quoted and validated. 42 new tests exercise the real `git` binary in throwaway repositories.
 
 ### [August 16, 2026] — Step 12: File & Folder Access (Permission-Gated)
 * **Added Files:** `sopno/tools/builtins/files.py`, `tests/test_files.py`

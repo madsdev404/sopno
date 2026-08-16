@@ -36,6 +36,20 @@ class TestSopnoTools(unittest.TestCase):
         self.assertIn("manage_service", names)
         self.assertIn("read_logs", names)
         self.assertIn("manage_cron", names)
+        self.assertIn("read_file", names)
+        self.assertIn("write_file", names)
+        self.assertIn("edit_file", names)
+        self.assertIn("list_directory", names)
+        self.assertIn("delete_file", names)
+        self.assertIn("rename_file", names)
+        self.assertIn("git_status", names)
+        self.assertIn("git_log", names)
+        self.assertIn("git_diff", names)
+        self.assertIn("git_branch", names)
+        self.assertIn("git_add", names)
+        self.assertIn("git_commit", names)
+        self.assertIn("git_stash", names)
+        self.assertIn("git_commit_message", names)
 
     def test_get_current_time(self) -> None:
         """Verify datetime string conforms to standard pattern (e.g. 'It is ... on ...')."""

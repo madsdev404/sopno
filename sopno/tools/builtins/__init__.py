@@ -19,6 +19,7 @@ Files:
   - terminal.py      → run_terminal, terminal_send, terminal_status
   - manage.py        → list_processes, kill_process, manage_service, read_logs, manage_cron
   - files.py         → read_file, write_file, edit_file, list_directory, delete_file, rename_file
+  - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 
 __all__: list[str] = []

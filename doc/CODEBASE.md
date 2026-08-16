@@ -377,7 +377,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 23 tools:
+ the LLM (OpenAI-style `function` objects). It defines 31 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -400,6 +400,14 @@ This is the most important file in the project. It:
 | `list_directory` | List a folder's entries | `path` |
 | `delete_file` | Delete a single file (confirmed) | `path` |
 | `rename_file` | Move/rename a file (confirmed) | `path`, `new_path` |
+| `git_status` | Working-tree status + recent history | `repo` |
+| `git_log` | Recent commits, one line each | `repo`, `limit` |
+| `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
+| `git_branch` | List/create/switch/delete branches | `repo`, `action`, `name` |
+| `git_add` | Stage files (confirmed) | `repo`, `paths` |
+| `git_commit` | Create a commit (confirmed) | `repo`, `message`, `add_all` |
+| `git_stash` | List/push/pop stashes | `repo`, `action`, `message` |
+| `git_commit_message` | LLM-drafted commit message from the diff | `repo`, `staged` |
 | `control_volume` | Volume up/down/mute | `action` |
 | `get_system_stats` | CPU/RAM/battery | — |
 | `lock_screen` | Lock the desktop | — |
@@ -467,6 +475,23 @@ domain:
     a Yes/No prompt; the assistant asks the user (spoken in voice mode, typed in
     text mode) and resolves via `pending_action()` / `resolve_pending()` in
     `core/assistant.py`. Disable with `file_confirm_writes: false`.
+- **`git.py`** — git repository tools, all routed through the shared terminal
+  session (`git -C <repo> …`, color forced off) so the blocklist applies and any
+  repository can be addressed explicitly.
+  - `git_status(repo)` — `git status --short --branch` + last 10 commits.
+  - `git_log(repo, limit)` — `git log --oneline -n N` (clamped 1-50).
+  - `git_diff(repo, staged)` — working-tree or staged diff, capped by
+    `git_max_diff_chars`.
+  - `git_branch(repo, action, name)` — list (`branch -a`), create, switch
+    (`checkout`), or delete (`branch -d`, confirmed). Branch names are validated.
+  - `git_add(repo, paths)` — stage files via `git add -- …` (confirmed).
+  - `git_commit(repo, message, add_all)` — `git commit -m`, optionally after
+    `git add -A` (confirmed).
+  - `git_stash(repo, action, message)` — list / push / pop (push and pop confirmed).
+  - `git_commit_message(repo, staged)` — read-only; feeds the diff to the local
+    LLM and returns a conventional `type(scope): summary` + body suggestion.
+  - Values interpolated into git arguments are shlex-quoted and checked against
+    shell metacharacters; the `git_enabled` master switch is in `config.json`.
 - **`datetime_tool.py`** — `get_current_time()` returns e.g.
   "It is 09:41 AM on Thursday, August 13."
 - **`media.py`** — `play_media_control(action)` controls media players via

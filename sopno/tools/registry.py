@@ -29,6 +29,16 @@ from sopno.tools.builtins.files import (
     delete_file,
     rename_file,
 )
+from sopno.tools.builtins.git import (
+    git_status,
+    git_log,
+    git_diff,
+    git_branch,
+    git_add,
+    git_commit,
+    git_stash,
+    git_commit_message,
+)
 from sopno.llm.researcher import research
 
 
@@ -57,6 +67,14 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "list_directory": list_directory,
     "delete_file": delete_file,
     "rename_file": rename_file,
+    "git_status": git_status,
+    "git_log": git_log,
+    "git_diff": git_diff,
+    "git_branch": git_branch,
+    "git_add": git_add,
+    "git_commit": git_commit,
+    "git_stash": git_stash,
+    "git_commit_message": git_commit_message,
 }
 
 
