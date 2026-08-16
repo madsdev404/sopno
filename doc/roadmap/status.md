@@ -52,10 +52,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Safety Blocklist:** Destructive/irreversible patterns (`rm -rf /`, `mkfs`/`fdisk`, shutdown/reboot, fork bombs, raw disk writes, `curl|sh`) are blocked; fully configurable via `terminal_blocklist` in `config.json`.
 * [x] **Graceful Shutdown:** The shared shell session closes when Sopno stops.
 
+### 8. Process / Service / Log / Cron Management — **[COMPLETED]**
+* [x] **Processes:** `list_processes` (top-by-CPU with keyword filter) and `kill_process` (by PID or name, with protected targets).
+* [x] **Services:** `manage_service` — start/stop/restart/status/enable/disable/reload via `systemctl --user` (no sudo needed).
+* [x] **Logs:** `read_logs` — user/system journal (optionally per unit) or a raw `tail` of an absolute log file path.
+* [x] **Cron:** `manage_cron` — list / add / remove crontab jobs non-interactively; blocked or malformed commands are refused.
+* [x] **Safety:** everything executes through the shared terminal session, so the `terminal_blocklist` and Sopno's privileges apply uniformly.
+
 ---
 
 ## 📓 Technical Progress Log
 
+### [August 16, 2026] — Step 11: Process / Service / Log / Cron Management
+* **Added Files:** `sopno/tools/builtins/manage.py`, `tests/test_manage.py`
+* **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/core/assistant.py`, `sopno/tools/builtins/terminal.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now manage the system it runs on, all executed through the persistent terminal session (so the safety blocklist applies everywhere): `list_processes` / `kill_process` (kernel, init, systemd, and Sopno's own shell are protected), `manage_service` via `systemctl --user` (start/stop/restart/status/enable/disable/reload), `read_logs` from the user/system journal or any log file, and `manage_cron` (list/add/remove, with schedule validation and blocked-command refusal). `terminal.py` gained `_run_command_raw` (structured stdout + exit code for higher-level tools) and `_shell_pid` (self-session kill guard).
 ### [August 16, 2026] — Step 10: Terminal Access (Persistent Shell)
 * **Added Files:** `sopno/tools/builtins/terminal.py`, `tests/test_terminal.py`
 * **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/config/settings.py`, `config.json`, `sopno/core/assistant.py`, `requirements.txt`, `tests/test_tools.py`, `doc/CODEBASE.md`

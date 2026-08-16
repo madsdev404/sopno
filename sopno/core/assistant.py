@@ -44,6 +44,7 @@ _TOOLISH = re.compile(
     r"latest|news|update|fact|define|explain|"
     r"terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"
     r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
+    r"service|cron|log|journal|systemctl|ps aux|list processes|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ"
     r")\b",
     re.IGNORECASE,

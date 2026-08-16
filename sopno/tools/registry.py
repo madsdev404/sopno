@@ -14,6 +14,13 @@ from sopno.tools.builtins.search import search_web, fetch_url
 from sopno.tools.builtins.datetime_tool import get_current_time
 from sopno.tools.builtins.media import play_media_control
 from sopno.tools.builtins.terminal import run_terminal, terminal_send, terminal_status
+from sopno.tools.builtins.manage import (
+    list_processes,
+    kill_process,
+    manage_service,
+    read_logs,
+    manage_cron,
+)
 from sopno.llm.researcher import research
 
 
@@ -31,6 +38,11 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "run_terminal": run_terminal,
     "terminal_send": terminal_send,
     "terminal_status": terminal_status,
+    "list_processes": list_processes,
+    "kill_process": kill_process,
+    "manage_service": manage_service,
+    "read_logs": read_logs,
+    "manage_cron": manage_cron,
 }
 
 

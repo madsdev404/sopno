@@ -145,6 +145,122 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "list_processes",
+            "description": "List the top running processes by CPU usage, optionally filtered by a keyword (matches user, process name, or command line).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Optional keyword to filter processes by (e.g. 'chrome' or 'python')."
+                    },
+                    "limit": {
+                        "type": "number",
+                        "description": "Max rows to show (1-50, default 10)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "kill_process",
+            "description": "Terminate a running process by PID (e.g. '4321') or exact process name (e.g. 'firefox'). System-critical processes and Sopno's own session are protected. Prefer signal TERM unless the process is stuck.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {
+                        "type": "string",
+                        "description": "The PID or the exact process name to kill."
+                    },
+                    "signal": {
+                        "type": "string",
+                        "enum": ["TERM", "INT", "KILL", "HUP", "STOP", "CONT"],
+                        "description": "Signal to send (default TERM)."
+                    }
+                },
+                "required": ["target"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_service",
+            "description": "Control a systemd user service (systemctl --user, no sudo needed): start, stop, restart, status, enable, disable, or reload.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["start", "stop", "restart", "status", "enable", "disable", "reload"],
+                        "description": "The service action to perform."
+                    },
+                    "service": {
+                        "type": "string",
+                        "description": "The unit name (e.g. 'sopno.service')."
+                    }
+                },
+                "required": ["action", "service"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "read_logs",
+            "description": "Read recent log entries. Source 'user' reads the user journal, 'system' the system journal; pass a unit to filter by service. A source that is an absolute path (e.g. '/var/log/syslog') tails that log file.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "description": "'user' (default), 'system', or an absolute log file path."
+                    },
+                    "unit": {
+                        "type": "string",
+                        "description": "Optional systemd unit to filter the journal by (e.g. 'sopno.service')."
+                    },
+                    "lines": {
+                        "type": "number",
+                        "description": "Number of most-recent lines (1-300, default 30)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "manage_cron",
+            "description": "Manage the current user's cron jobs: 'list' shows them, 'add' schedules a new job (schedule + command), 'remove' deletes jobs matching a command. Schedule uses 5 cron fields (e.g. '0 9 * * *') or a shortcut like '@daily'. Blocked/destructive commands are refused.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["list", "add", "remove"],
+                        "description": "What to do (default 'list')."
+                    },
+                    "schedule": {
+                        "type": "string",
+                        "description": "For add: 5 cron fields or @shortcut, e.g. '0 9 * * *' or '@daily'."
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "For add: the command to run. For remove: text that identifies the job."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "control_volume",
             "description": "Control the PC speaker volume (up to raise, down to lower, toggle to mute/unmute).",
             "parameters": {

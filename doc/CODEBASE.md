@@ -377,7 +377,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
-the LLM (OpenAI-style `function` objects). It defines 12 tools:
+the LLM (OpenAI-style `function` objects). It defines 17 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -389,6 +389,11 @@ the LLM (OpenAI-style `function` objects). It defines 12 tools:
 | `run_terminal` | Run a shell command persistently | `command`, `timeout` |
 | `terminal_send` | Send keys/stdin to the running program | `keys`, `enter` |
 | `terminal_status` | Poll the terminal session state | — |
+| `list_processes` | Top processes, optional filter | `query`, `limit` |
+| `kill_process` | Terminate a process by PID/name | `target`, `signal` |
+| `manage_service` | systemctl --user start/stop/restart/… | `action`, `service` |
+| `read_logs` | Journalctl / file-tail log entries | `source`, `unit`, `lines` |
+| `manage_cron` | List/add/remove cron jobs | `action`, `schedule`, `command` |
 | `control_volume` | Volume up/down/mute | `action` |
 | `get_system_stats` | CPU/RAM/battery | — |
 | `lock_screen` | Lock the desktop | — |
@@ -427,6 +432,18 @@ domain:
   - Safety: destructive/irreversible commands are blocked via a configurable
     `terminal_blocklist` (`config.json`), and `curl|sh`-style pipe-to-shell is
     rejected.
+- **`manage.py`** — process / service / log / cron management, all routed through
+  the shared terminal session (so blocklist + privilege rules apply).
+  - `list_processes(query, limit)` — `ps aux --sort=-%cpu`, optional keyword filter.
+  - `kill_process(target, signal)` — `kill` by PID or `pkill -x` by name; refuses
+    kernel/init, systemd/sopno, and Sopno's own shell session.
+  - `manage_service(action, service)` — `systemctl --user` start/stop/restart/
+    status/enable/disable/reload (no sudo needed for user units).
+  - `read_logs(source, unit, lines)` — `journalctl --user/--system` (+ optional
+    unit) or `tail` of an absolute log file path.
+  - `manage_cron(action, schedule, command)` — list / add / remove crontab jobs
+    (installed non-interactively via a temp file); refuses blocked commands and
+    validates the schedule.
 - **`datetime_tool.py`** — `get_current_time()` returns e.g.
   "It is 09:41 AM on Thursday, August 13."
 - **`media.py`** — `play_media_control(action)` controls media players via

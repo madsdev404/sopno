@@ -31,6 +31,11 @@ class TestSopnoTools(unittest.TestCase):
         self.assertIn("run_terminal", names)
         self.assertIn("terminal_send", names)
         self.assertIn("terminal_status", names)
+        self.assertIn("list_processes", names)
+        self.assertIn("kill_process", names)
+        self.assertIn("manage_service", names)
+        self.assertIn("read_logs", names)
+        self.assertIn("manage_cron", names)
 
     def test_get_current_time(self) -> None:
         """Verify datetime string conforms to standard pattern (e.g. 'It is ... on ...')."""

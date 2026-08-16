@@ -115,6 +115,40 @@ def _close() -> None:
             _ENGINE = None
 
 
+def _shell_pid() -> Optional[int]:
+    """PID of the shell owning the shared session, or None if not started."""
+    with _ENGINE_LOCK:
+        if _ENGINE is not None:
+            return getattr(_ENGINE, "_shell_pid", None)
+    return None
+
+
+def _run_command_raw(command: str, timeout: Optional[float] = None) -> dict:
+    """
+    Run a command and return the raw cleat result dict.
+
+    Higher-level tools (process/service/log/cron) use this to get structured
+    stdout + a real exit code instead of the human-formatted string. Shares the
+    same session, timeout clamps, and safety blocklist as ``run_terminal``.
+
+    Returned dict keys: ``stdout``, ``exit_code``, ``completed``, ``state``,
+    plus either ``blocked`` (safety policy reason) or ``error`` (engine failure)
+    when the command did not actually execute.
+    """
+    command = (command or "").strip()
+    reason = _blocked_reason(command)
+    if reason:
+        return {"stdout": "", "exit_code": None, "completed": True,
+                "state": "idle", "blocked": reason}
+    timeout = max(1.0, min(float(timeout or settings.terminal_timeout),
+                           float(settings.terminal_max_timeout)))
+    try:
+        return _engine().run_command(command, timeout=timeout)
+    except Exception as e:
+        return {"stdout": "", "exit_code": None, "completed": True,
+                "state": "idle", "error": f"Terminal error: {e}"}
+
+
 # ── Tools ────────────────────────────────────────────────────────────────────
 
 def run_terminal(command: str, timeout: Optional[float] = None) -> str:
@@ -133,23 +167,15 @@ def run_terminal(command: str, timeout: Optional[float] = None) -> str:
     if not command:
         return "Please provide a command to run."
 
-    reason = _blocked_reason(command)
-    if reason:
+    result = _run_command_raw(command, timeout=timeout)
+    if result.get("blocked"):
         return (
-            f"Blocked by safety policy — {reason}. "
+            f"Blocked by safety policy — {result['blocked']}. "
             "If this command is actually safe, allow it in terminal_blocklist "
             "in config.json."
         )
-
-    timeout = max(1.0, min(float(timeout or settings.terminal_timeout),
-                           float(settings.terminal_max_timeout)))
-    try:
-        result = _engine().run_command(command, timeout=timeout)
-    except RuntimeError as e:
-        return f"Terminal error: {e}"
-    except Exception as e:
-        return f"Terminal error: {e}"
-
+    if result.get("error"):
+        return result["error"]
     return _format_output(result)
 
 
