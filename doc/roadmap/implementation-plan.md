@@ -5,9 +5,10 @@ written so each feature can be built and tested one at a time, in order.
 
 **Current baseline (all done):** voice (STT/TTS/wakeword/barge-in), persistent
 terminal + process/service/log/cron management, internet (search/fetch) + deep
-research (RAG), permission-gated file access (read/write/edit/delete/rename),
-git tools (status/log/diff/branch/add/commit/stash + LLM commit messages),
-memory (context + SQLite), tool framework (31 tools), HUD/CLI.
+research (RAG), permission-gated file access (read/write/edit/delete/rename +
+search/copy/move + PDF/image/Office readers), git tools
+(status/log/diff/branch/add/commit/stash + LLM commit messages), memory
+(context + SQLite + semantic vectors), tool framework (34 tools), HUD/CLI.
 
 ---
 
@@ -106,7 +107,7 @@ recall returns the nearest row; assert graceful fallback when Ollama missing.
 > never stored (they'd match everything at cosine 0.5). Fallback to FTS5-only
 > verified in `tests/test_semantic.py` (14 tests, mocked embeddings).
 
-### 3. File Access Round 2
+### 3. File Access Round 2 — ✅ IMPLEMENTED (Step 15)
 
 **Research findings**
 - **Search:** filename → `Path.rglob` + `fnmatch`/regex; content → read text
@@ -137,6 +138,16 @@ recall returns the nearest row; assert graceful fallback when Ollama missing.
 
 **Deps (optional, graceful import):** `pymupdf`, `Pillow`, `pytesseract`,
 `python-docx`, `python-pptx`, `openpyxl`; system `tesseract-ocr`, `libreoffice`.
+
+> **✅ IMPLEMENTED (Step 15, Aug 16 2026):** `sopno/tools/builtins/readers.py`
+> + new tools in `files.py`. `search_files` (name/content modes, `path:line`
+> hits, `file_search_max_results` cap, skips blocked + binary), `copy_file`
+> (files & folders, `overwrite` flag, confirmed), `move_file` (confirmed alias
+> of `rename_file`). `read_file` routes binary docs by suffix through a layered
+> extractor (PDF native → OCR; image OCR; Office; legacy LibreOffice), capped by
+> `readers_max_pages`/`readers_max_chars`, and tags output with the method used.
+> Binary-file skip in content search uses `readers.is_binary_like` (suffix or
+> null-byte sniff). 41 new tests → suite at 291.
 
 ### 4. Scheduler / Reminders
 

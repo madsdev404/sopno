@@ -402,7 +402,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 31 tools:
+ the LLM (OpenAI-style `function` objects). It defines 34 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -425,6 +425,9 @@ This is the most important file in the project. It:
 | `list_directory` | List a folder's entries | `path` |
 | `delete_file` | Delete a single file (confirmed) | `path` |
 | `rename_file` | Move/rename a file (confirmed) | `path`, `new_path` |
+| `copy_file` | Duplicate a file or folder (confirmed) | `path`, `new_path`, `overwrite` |
+| `move_file` | Move/rename a file; alias of rename_file | `path`, `new_path` |
+| `search_files` | Find files by name or content | `query`, `path`, `mode` |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -484,22 +487,38 @@ domain:
     (installed non-interactively via a temp file); refuses blocked commands and
     validates the schedule.
 - **`files.py`** — permission-gated file & folder access.
-  - `read_file(path, lines)` — file contents (head/tail supported), capped output.
+  - `read_file(path, lines)` — file contents (head/tail supported), capped output;
+    PDFs/images/Office docs auto-route to the binary readers.
   - `write_file(path, content)` — create or overwrite; identical writes short-circuit.
   - `edit_file(path, old_string, new_string)` — exact-string replace; `old_string`
     must occur exactly once (read-before-edit invariant, re-checked before writing).
   - `list_directory(path)` — sorted entries with type + size (defaults to project root).
   - `delete_file(path)` — remove a single file (folders never deleted).
-  - `rename_file(path, new_path)` — move/rename; never overwrites an existing target.
+  - `rename_file(path, new_path)` / `move_file(path, new_path)` — move/rename;
+    never overwrites an existing target.
+  - `copy_file(path, new_path, overwrite)` — duplicate a file or a whole folder;
+    refuses to overwrite unless `overwrite=true`.
+  - `search_files(query, path, mode)` — `name` (fnmatch glob or substring over
+    file names) or `content` (regex/plain-text grep returning `path:line` hits).
+    Skips blocked paths and binary files; results capped by
+    `file_search_max_results` (default 50), 5000 files scanned max.
   - **Permission gate** (`_authorize`), applied to every operation in order:
     1. master switch `file_enabled`; 2. absolute resolved (symlink-safe) path;
     3. secret deny-list `file_blocked_paths` (`.env`, `.git`, `.ssh`, `*.pem`,
     `config.json`, `sopno/memory/memory.db`, …); 4. allowed roots
     `file_allowed_read` / `file_allowed_write` (default: project root).
-  - **Confirmation**: writes/edits/deletes/renames park a pending action and return
-    a Yes/No prompt; the assistant asks the user (spoken in voice mode, typed in
-    text mode) and resolves via `pending_action()` / `resolve_pending()` in
+  - **Confirmation**: writes/edits/deletes/renames/copies park a pending action and
+    return a Yes/No prompt; the assistant asks the user (spoken in voice mode, typed
+    in text mode) and resolves via `pending_action()` / `resolve_pending()` in
     `core/assistant.py`. Disable with `file_confirm_writes: false`.
+- **`readers.py`** — binary document readers used by `read_file` (all optional).
+  - `extract_text(path) -> (text, method)` routes by suffix: `.pdf` (PyMuPDF native
+    text, OCR fallback for scanned pages), images `.png/.jpg/…` (Tesseract OCR),
+    `.docx/.pptx/.xlsx` (python-docx/python-pptx/openpyxl), legacy `.doc/.xls/.ppt`
+    via `libreoffice --headless --convert-to txt`. Capped by `readers_max_pages`
+    (20) / `readers_max_chars` (20000); OCR gated by `file_ocr_enabled`.
+  - `is_binary_like(path)` — document suffix or null-byte sniff, used by
+    `read_file` routing and `search_files` skipping.
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.

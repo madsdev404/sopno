@@ -176,6 +176,14 @@ class Settings:
         self.file_output_chars: int = int(data.get("file_output_chars", 6000))
         # Ask Yes/No before every write, edit, delete, and rename.
         self.file_confirm_writes: bool = bool(data.get("file_confirm_writes", True))
+        # Cap for search_files hits (both name and content modes).
+        self.file_search_max_results: int = int(data.get("file_search_max_results", 50))
+        # Allow OCR (Tesseract) when native text extraction finds nothing.
+        self.file_ocr_enabled: bool = bool(data.get("file_ocr_enabled", True))
+        # Page/image limits and text cap for the binary readers (PDF, images,
+        # Office docs). Text files still use file_max_size_bytes/file_output_chars.
+        self.readers_max_pages: int = int(data.get("readers_max_pages", 20))
+        self.readers_max_chars: int = int(data.get("readers_max_chars", 20000))
 
         # ── Git ───────────────────────────────────────────────
         # Master switch for the git tools.

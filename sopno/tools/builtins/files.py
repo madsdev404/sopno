@@ -17,22 +17,28 @@ Every operation passes through the ``_authorize`` gate, applied in order:
 Writes that need confirmation are parked in a pending-action slot; the
 assistant asks the user, then calls ``resolve_pending`` on the next reply.
 
-  read_file(path, lines)     → file contents (optionally head/tail)
+  read_file(path, lines)     → file contents (optionally head/tail), binary docs
   write_file(path, content)  → create or overwrite a file (confirmed)
   edit_file(path, old, new)  → exact-string replace (confirmed)
   list_directory(path)       → entries of a folder
   delete_file(path)          → remove a single file (confirmed)
   rename_file(path, new)     → move / rename a file (confirmed)
+  copy_file(path, new)       → duplicate a file or folder (confirmed)
+  move_file(path, new)       → alias of rename_file (confirmed)
+  search_files(query, ...)   → find files by name or content
 """
 
 from __future__ import annotations
 
 import fnmatch
+import re
+import shutil
 import uuid
 from pathlib import Path
 from typing import Callable, Optional
 
 from sopno.config.settings import settings
+from sopno.tools.builtins import readers
 
 _MAX_ENTRIES = 200
 
@@ -191,6 +197,15 @@ def read_file(path: str, lines: Optional[int] = None) -> str:
         return f"{target} is a folder. Use list_directory to see its contents."
     if not target.is_file():
         return f"No file at {target}."
+
+    # Binary documents (PDF, images, Office) are routed to the readers, which
+    # have their own page/image and output caps (they can exceed the text
+    # file_max_size_bytes limit, e.g. scanned PDFs).
+    if readers.is_binary_like(target):
+        text, method = readers.extract_text(target)
+        if method:
+            return f"[{method}] {text}"
+
     size = target.stat().st_size
     if size > _max_size():
         return (f"{target} is {_fmt_size(size)} — larger than the "
@@ -446,3 +461,165 @@ def rename_file(path: str, new_path: str) -> str:
     if not settings.file_confirm_writes:
         return _do()
     return _awaiting_confirmation(description, _do)
+
+
+# ── Search ───────────────────────────────────────────────────────────────────
+
+def _search_max_results() -> int:
+    return max(1, int(getattr(settings, "file_search_max_results", 50)))
+
+
+def search_files(query: str, path: str = "", mode: str = "content") -> str:
+    """
+    Find files by file name or by content.
+
+    Args:
+        query: Filename pattern (mode="name", fnmatch glob or plain substring)
+            or text to search for inside files (mode="content", regex).
+        path: Folder to search, absolute (defaults to the project root).
+        mode: "name" searches file names; "content" greps file contents.
+
+    Returns:
+        A capped list of hits, or a reason the search cannot run.
+    """
+    query = (query or "").strip()
+    if not query:
+        return "Please provide something to search for."
+    mode = (mode or "content").strip().lower()
+    if mode not in ("name", "content"):
+        return f"Unknown mode '{mode}' — use 'name' or 'content'."
+
+    if path:
+        target, err = _resolve_target(path)
+        if err:
+            return err
+    else:
+        target = settings.project_root
+    assert target is not None
+    reason = _authorize(target, "read")
+    if reason:
+        return reason
+    if target.is_file():
+        return f"{target} is a file. Point search_files at a folder."
+    if not target.is_dir():
+        return f"No folder at {target}."
+
+    cap = _search_max_results()
+    hits: list[str] = []
+    scanned = 0
+    try:
+        for p in target.rglob("*"):
+            scanned += 1
+            if scanned > 5000:
+                hits.append("…(searched 5000 files, stopping)…")
+                break
+            if _blocked_reason(p):
+                continue
+            if mode == "name":
+                if not p.is_file():
+                    continue
+                name = p.name
+                if fnmatch.fnmatch(name, query) or query.lower() in name.lower():
+                    hits.append(str(p))
+            else:
+                if not p.is_file():
+                    continue
+                if readers.is_binary_like(p):
+                    continue
+                line = _grep_line(p, query)
+                if line is not None:
+                    hits.append(line)
+            if len(hits) >= cap:
+                break
+    except OSError as e:
+        return f"Could not search {target}: {e}"
+
+    if not hits:
+        return f"No matches for {query!r} under {target}."
+
+    head = f"{len(hits)} match{'es' if len(hits) != 1 else ''}"
+    if len(hits) >= cap:
+        head += f" (capped at {cap})"
+    return head + "\n" + "\n".join(hits)
+
+
+def _grep_line(path: Path, pattern: str) -> Optional[str]:
+    """First 'path:line' for a regex/substring in a file, or None."""
+    try:
+        with open(path, "r", encoding="utf-8", errors="replace") as fh:
+            for lineno, raw in enumerate(fh, start=1):
+                if _pattern_matches(pattern, raw):
+                    line = raw.rstrip("\n")
+                    if len(line) > 200:
+                        line = line[:200] + "…"
+                    return f"{path}:{lineno}: {line}"
+    except OSError:
+        return None
+    return None
+
+
+def _pattern_matches(pattern: str, text: str) -> bool:
+    try:
+        return re.search(pattern, text, re.IGNORECASE) is not None
+    except re.error:
+        return pattern.lower() in text.lower()
+
+
+# ── Copy / move ──────────────────────────────────────────────────────────────
+
+def copy_file(path: str, new_path: str, overwrite: bool = False) -> str:
+    """
+    Duplicate a file or folder (files and folders both copy).
+
+    Args:
+        path: Absolute path of the file or folder to copy.
+        new_path: Absolute destination path.
+        overwrite: Allow replacing an existing destination (default False).
+
+    Returns:
+        Confirmation, or a reason the copy cannot happen.
+    """
+    src, err = _resolve_target(path)
+    if err:
+        return err
+    dst, err2 = _resolve_target(new_path)
+    if err2:
+        return err2
+    assert src is not None and dst is not None
+    reason = _authorize(src, "read")
+    if reason:
+        return reason
+    reason = _authorize(dst, "write")
+    if reason:
+        return reason
+    if not src.exists():
+        return f"No file or folder at {src}."
+    if dst == src:
+        return "Source and destination are the same path."
+    if dst.exists() and not overwrite:
+        return f"{dst} already exists — pass overwrite=true to replace it."
+
+    description = f"copy '{src}' to '{dst}'"
+
+    def _do() -> str:
+        try:
+            if src.is_dir():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copytree(src, dst)
+            else:
+                dst.parent.mkdir(parents=True, exist_ok=True)
+                shutil.copy2(src, dst)
+        except OSError as e:
+            return f"Could not copy {src}: {e}"
+        return f"Done — copied {src} to {dst}."
+
+    if not settings.file_confirm_writes:
+        return _do()
+    return _awaiting_confirmation(description, _do)
+
+
+def move_file(path: str, new_path: str) -> str:
+    """Move/rename a single file. Alias of rename_file (confirmed)."""
+    return rename_file(path, new_path)

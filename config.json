@@ -64,6 +64,10 @@
   "file_max_size_bytes": 2000000,
   "file_output_chars": 6000,
   "file_confirm_writes": true,
+  "file_search_max_results": 50,
+  "file_ocr_enabled": true,
+  "readers_max_pages": 20,
+  "readers_max_chars": 20000,
   "git_enabled": true,
   "git_max_diff_chars": 12000
 }

@@ -262,7 +262,7 @@ TOOLS_SCHEMA = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file inside an allowed folder (by default the project). Folders are never listed here — use list_directory for that.",
+            "description": "Read the contents of a file inside an allowed folder (by default the project). PDFs, images, and Office documents (.pdf/.png/.jpg/.docx/.xlsx/.pptx/…) are read automatically with text extraction or OCR. Folders are never listed here — use list_directory for that.",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -377,6 +377,77 @@ TOOLS_SCHEMA = [
                     }
                 },
                 "required": ["path", "new_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "copy_file",
+            "description": "Duplicate a file or folder inside an allowed folder. Won't overwrite an existing destination unless overwrite=true. Needs the user's Yes/No confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the file or folder to copy."
+                    },
+                    "new_path": {
+                        "type": "string",
+                        "description": "Absolute destination path."
+                    },
+                    "overwrite": {
+                        "type": "boolean",
+                        "description": "Allow replacing an existing destination (default false)."
+                    }
+                },
+                "required": ["path", "new_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "move_file",
+            "description": "Move or rename a single file inside an allowed folder. The destination must not already exist. Needs the user's Yes/No confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the file to move."
+                    },
+                    "new_path": {
+                        "type": "string",
+                        "description": "Absolute destination path."
+                    }
+                },
+                "required": ["path", "new_path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search_files",
+            "description": "Find files by file name (mode='name') or by their contents (mode='content'). Name mode matches fnmatch globs or substrings; content mode matches regex or plain text and returns path:line hits. Searches a folder (defaults to the project root) and skips blocked paths and binary files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Filename pattern (mode='name') or text/regex to find inside files (mode='content')."
+                    },
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute folder to search (optional — defaults to the project root)."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "description": "'name' or 'content' (default 'content')."
+                    }
+                },
+                "required": ["query"]
             }
         }
     },

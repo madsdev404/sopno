@@ -65,7 +65,10 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Allowlist Roots, Deny-by-Default:** reads allowed only inside `file_allowed_read` and writes only inside `file_allowed_write` (default: the project root) — everything else is refused.
 * [x] **Secret Deny-List:** `.env`, `.git`, `.ssh`, `*.pem`/`*.key`, `credentials.json`, Sopno's own `config.json` and `memory.db` are off-limits even inside the roots.
 * [x] **Symlink-Safe Paths:** every path is `resolve()`d before checking, so `..`/symlinks can't escape the roots.
-* [x] **HUD/CLI Confirmation:** every write/edit/delete/rename parks a pending action and asks the user Yes/No (spoken in voice mode, typed in text mode); `file_confirm_writes` can disable the prompt.
+* [x] **HUD/CLI Confirmation:** every write/edit/delete/rename/copy parks a pending action and asks the user Yes/No (spoken in voice mode, typed in text mode); `file_confirm_writes` can disable the prompt.
+* [x] **Search:** `search_files` — by file name (`mode="name"`, fnmatch glob/substring) or file contents (`mode="content"`, regex → `path:line` hits); skips blocked paths and binaries; capped by `file_search_max_results`.
+* [x] **Copy / Move:** `copy_file` (files *and* folders; refuses overwrite unless `overwrite=true`) and `move_file` (alias of `rename_file`) — both confirmed.
+* [x] **Binary Document Readers:** `read_file` auto-detects PDFs (PyMuPDF text + OCR fallback for scans), images (Tesseract OCR), `.docx/.pptx/.xlsx` (python-docx/python-pptx/openpyxl), and legacy `.doc/.xls/.ppt` (LibreOffice headless). All optional/graceful; capped by `readers_max_pages`/`readers_max_chars`; OCR gated by `file_ocr_enabled`.
 
 ### 10. Git Tools — **[COMPLETED]**
 * [x] **Read-Only Tools:** `git_status` (branch + working-tree + recent history), `git_log` (one-line history, clamped), `git_diff` (unstaged or staged, capped), `git_commit_message` (LLM-drafts a conventional message from the diff — read-only).
@@ -76,6 +79,11 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 15: File Access Round 2 (Search, Copy, Binary Readers)
+* **Added Files:** `sopno/tools/builtins/readers.py`, `tests/test_readers.py`
+* **Modified Files:** `sopno/tools/builtins/files.py`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/config/settings.py`, `config.json`, `sopno/core/assistant.py`, `tests/test_files.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now *find* and *handle* real-world documents, all still inside the permission roots. `search_files` finds files by name (globs/substrings) or greps contents (regex → `path:line`, capped at `file_search_max_results`, skipping blocked paths and binaries). `copy_file` duplicates files or whole folders (refuses overwrite unless asked) and `move_file` is a confirmed alias of `rename_file`. `read_file` now auto-detects PDFs, images, `.docx/.pptx/.xlsx`, and legacy Office files via a layered reader pipeline (`readers.py`): fast native extraction → OCR for scans/images (Tesseract) → LibreOffice for legacy formats — every dependency optional and best-effort, with page/output caps and a `[method]` label so Sopno knows how each document was read. 3 new tools (34 total), 41 new tests → suite at 291.
 
 ### [August 16, 2026] — Step 14: Semantic (Vector) Memory
 * **Added Files:** `sopno/memory/semantic.py`, `tests/test_semantic.py`

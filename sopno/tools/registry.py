@@ -28,6 +28,9 @@ from sopno.tools.builtins.files import (
     list_directory,
     delete_file,
     rename_file,
+    copy_file,
+    move_file,
+    search_files,
 )
 from sopno.tools.builtins.git import (
     git_status,
@@ -67,6 +70,9 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "list_directory": list_directory,
     "delete_file": delete_file,
     "rename_file": rename_file,
+    "copy_file": copy_file,
+    "move_file": move_file,
+    "search_files": search_files,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

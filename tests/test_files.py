@@ -11,13 +11,16 @@ from pathlib import Path
 from sopno.config.settings import settings
 from sopno.tools.builtins import files
 from sopno.tools.builtins.files import (
+    copy_file,
     delete_file,
     edit_file,
     list_directory,
+    move_file,
     pending_action,
     read_file,
     rename_file,
     resolve_pending,
+    search_files,
     write_file,
 )
 
@@ -336,6 +339,152 @@ class TestConfirmation(FilesTestCase):
         resolve_pending(pid, "yes")
         self.assertFalse(src.exists())
         self.assertTrue(dst.exists())
+
+
+# ── search_files ─────────────────────────────────────────────────────────────
+
+class TestSearchFiles(FilesTestCase):
+    def search(self, query: str, mode: str = "content") -> str:
+        return search_files(query, path=str(self.root), mode=mode)
+
+    def test_search_by_name(self) -> None:
+        self.make("report.txt")
+        self.make("notes/report.md")
+        self.make("other.txt")
+        out = self.search("report*", mode="name")
+        self.assertIn("report.txt", out)
+        self.assertIn("report.md", out)
+        self.assertNotIn("other.txt", out)
+
+    def test_search_name_substring(self) -> None:
+        self.make("my-notes.txt")
+        self.make("other.txt")
+        out = self.search("notes", mode="name")
+        self.assertIn("my-notes.txt", out)
+        self.assertNotIn("other.txt", out)
+
+    def test_search_by_content(self) -> None:
+        self.make("a.txt", "alpha beta\nline two\n")
+        self.make("b.txt", "nothing here\n")
+        out = self.search("beta")
+        self.assertIn("a.txt:1", out)
+        self.assertIn("beta", out)
+        self.assertNotIn("b.txt", out)
+
+    def test_content_regex(self) -> None:
+        self.make("a.txt", "Hello Sopno\n")
+        out = self.search(r"sopno")
+        self.assertIn("a.txt:1", out)
+
+    def test_content_skips_binary_like(self) -> None:
+        self.make("a.txt", "alpha beta\n")
+        binp = self.root / "bin.dat"
+        binp.write_bytes(b"\x00\x01alpha\x00beta\x00")
+        out = self.search("alpha")
+        self.assertIn("a.txt", out)
+        self.assertNotIn("bin.dat", out)
+
+    def test_skips_blocked_paths(self) -> None:
+        self.make(".env", "SECRET")
+        self.make("ok.txt", "SECRET")
+        out = self.search("SECRET")
+        self.assertNotIn(".env", out)
+        self.assertIn("ok.txt", out)
+
+    def test_empty_query(self) -> None:
+        self.assertIn("something to search for", search_files("", path=str(self.root)))
+
+    def test_bad_mode(self) -> None:
+        self.assertIn("Unknown mode", search_files("x", path=str(self.root), mode="bogus"))
+
+    def test_result_cap(self) -> None:
+        settings.file_search_max_results = 2
+        for i in range(5):
+            self.make(f"hit{i}.txt", "needle\n")
+        out = self.search("needle")
+        self.assertIn("capped at 2", out)
+
+    def test_outside_root_refused(self) -> None:
+        out = search_files("x", path="/etc")
+        self.assertIn("outside the allowed read roots", out)
+
+    def test_no_matches(self) -> None:
+        self.make("a.txt", "hello\n")
+        self.assertIn("No matches", self.search("zebra"))
+
+    def test_defaults_to_project_root(self) -> None:
+        settings.file_allowed_read = [str(self.root), str(settings.project_root)]
+        out = search_files("sopno")
+        self.assertNotIn("No matches", out)
+
+
+# ── copy_file / move_file ────────────────────────────────────────────────────
+
+class TestCopyMove(FilesTestCase):
+    def test_copy_file(self) -> None:
+        src = self.make("src.txt", "data")
+        dst = self.root / "sub" / "copy.txt"
+        out = copy_file(str(src), str(dst))
+        self.assertIn("Done", out)
+        self.assertEqual(dst.read_text(encoding="utf-8"), "data")
+
+    def test_copy_folder(self) -> None:
+        folder = self.root / "tree"
+        folder.mkdir()
+        (folder / "inner.txt").write_text("hi", encoding="utf-8")
+        dst = self.root / "tree-copy"
+        copy_file(str(folder), str(dst))
+        self.assertTrue((dst / "inner.txt").is_file())
+
+    def test_copy_refuses_overwrite(self) -> None:
+        src = self.make("a.txt")
+        dst = self.make("b.txt")
+        out = copy_file(str(src), str(dst))
+        self.assertIn("already exists", out)
+        self.assertEqual(dst.read_text(encoding="utf-8"), "hello\nworld\n")
+
+    def test_copy_overwrite_true(self) -> None:
+        src = self.make("a.txt", "new")
+        dst = self.make("b.txt", "old")
+        out = copy_file(str(src), str(dst), overwrite=True)
+        self.assertIn("Done", out)
+        self.assertEqual(dst.read_text(encoding="utf-8"), "new")
+
+    def test_copy_same_path(self) -> None:
+        src = self.make("a.txt")
+        out = copy_file(str(src), str(src))
+        self.assertIn("same path", out)
+
+    def test_copy_confirmation(self) -> None:
+        settings.file_confirm_writes = True
+        src = self.make("a.txt")
+        dst = self.root / "b.txt"
+        out = copy_file(str(src), str(dst))
+        self.assertIn("permission", out)
+        self.assertFalse(dst.exists())
+        pid = pending_action()["id"]
+        resolve_pending(pid, "yes")
+        self.assertTrue(dst.exists())
+
+    def test_move_alias_of_rename(self) -> None:
+        src = self.make("old.txt", "data")
+        dst = self.root / "new.txt"
+        out = move_file(str(src), str(dst))
+        self.assertIn("Done", out)
+        self.assertFalse(src.exists())
+        self.assertEqual(dst.read_text(encoding="utf-8"), "data")
+
+    def test_move_refuses_overwrite(self) -> None:
+        src = self.make("a.txt")
+        dst = self.make("b.txt")
+        out = move_file(str(src), str(dst))
+        self.assertIn("already exists", out)
+        self.assertTrue(src.exists())
+
+    def test_copy_outside_write_root(self) -> None:
+        src = self.make("a.txt")
+        out = copy_file(str(src), "/tmp/evil.txt")
+        self.assertIn("outside the allowed write roots", out)
 
 
 if __name__ == "__main__":
