@@ -21,6 +21,7 @@ from sopno.config.settings import settings
 from sopno.core.context import ConversationContext
 from sopno.core.dispatcher import CommandDispatcher
 from sopno.core.reminders import ReminderPoller, ReminderStore, set_store as set_reminder_store
+from sopno.core.rules import RulePoller, RuleStore, set_store as set_rule_store
 from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import get_schema
@@ -56,6 +57,8 @@ _TOOLISH = re.compile(
     r"database|sql|query|install|uninstall|package|apt|pacman|pip|flatpak|"
     r"ping|traceroute|wifi|firewall|public ip|my ip|"
     r"email|mail|inbox|calendar|event|meeting|ocr|vision|describe (a )?(image|picture|screenshot)|"
+    r"rule|rules|automation|automate|if .* then |"
+    r"subagent|delegate|researcher|coder|reviewer|code review|review this|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",
@@ -222,6 +225,8 @@ class SopnoAssistant:
         self.reminder_store = ReminderStore()
         set_reminder_store(self.reminder_store)
         self._reminder_poller: Optional[ReminderPoller] = None
+        self._rule_poller: Optional[RulePoller] = None
+        self._rule_store: Optional[RuleStore] = None
         # Serializes speech so a fired reminder never overlaps a spoken reply.
         self._speech_lock = threading.Lock()
 
@@ -259,6 +264,12 @@ class SopnoAssistant:
         self.running = False
         close_terminal_shell()
         self.reminder_store.close()
+        if self._rule_store is not None:
+            try:
+                self._rule_store.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._rule_store = None
         if self._mcp_hub is not None:
             try:
                 self._mcp_hub.close()
@@ -365,6 +376,22 @@ class SopnoAssistant:
                 time.sleep(0.35)
                 self.on_status_changed("standby")
         self.on_log_message(f"[Reminder] Delivered: {text}")
+
+    def _deliver_rule(self, text: str) -> None:
+        """Deliver a fired automation-rule action from the background poller."""
+        if not self.running:
+            return
+        with self._speech_lock:
+            self.on_reply_generated(text)
+            if self.interaction_mode == "voice":
+                self.on_status_changed("speaking")
+                self._speak_with_barge_in(text)
+                self.on_status_changed("listening")
+            else:
+                self.on_status_changed("speaking")
+                time.sleep(0.35)
+                self.on_status_changed("standby")
+        self.on_log_message(f"[Rule] Fired: {text}")
 
     def _await_command(self) -> Optional[str]:
         """
@@ -700,6 +727,20 @@ class SopnoAssistant:
             self._reminder_poller.start()
             self.on_log_message(
                 f"Reminders enabled (poll every {settings.reminders_poll_seconds}s)."
+            )
+
+        # Background automation-rule poller — fires "if X then Y" rules.
+        if getattr(settings, "rules_enabled", True):
+            self._rule_store = RuleStore()
+            set_rule_store(self._rule_store)
+            self._rule_poller = RulePoller(
+                store=self._rule_store,
+                deliver=self._deliver_rule,
+                run_check=lambda: self.running,
+            )
+            self._rule_poller.start()
+            self.on_log_message(
+                f"Automation rules enabled (poll every {settings.rules_poll_seconds}s)."
             )
 
         while self.running:

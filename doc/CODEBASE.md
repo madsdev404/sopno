@@ -279,6 +279,41 @@ This is the most important file in the project. It:
   due reminders through a `deliver(text)` callback (the assistant's
   `_deliver_reminder`, guarded by a speech lock). Started in `SopnoAssistant.run`
   when `reminders_enabled`.
+
+**`sopno/core/rules.py`** — automation rules ("if X then Y"), backing the
+`rules.py` tools.
+
+- `_evaluate(condition)` — allowlist condition grammar only: `metric op value`
+  where metric ∈ {`battery_percent`, `cpu_percent`, `ram_percent`,
+  `disk_free_gb`, `hour_of_day`, `day_of_week`} and op ∈ {`< <= > >= ==`}.
+  Metrics come from `psutil` / the clock. **No eval, no free-form code.**
+- `_parse_action(action)` — shlex-parses `tool key="value" …`, validates the
+  tool is registered. Action args are simple strings.
+- `RuleStore` — own SQLite DB (`settings.rules_path`, WAL, RLock), rows
+  `rules(id, name, condition, action, enabled, created_at, last_fired,
+  fire_count)`. `add` (validates first), `list_rules`, `remove`,
+  `set_enabled`, `run` (fires each enabled rule once per true-period and
+  returns the results), `close`.
+- `_fire` — executes the action via the registry; if the action parks a
+  pending-action confirmation, it is auto-approved (the rule itself was the
+  one-time approval). Records `last_fired`/`fire_count`.
+- `RulePoller` — daemon thread; every `rules_poll_seconds` calls `store.run()`
+  and delivers each result through a `deliver(text)` callback (the assistant's
+  `_deliver_rule`, speech-locked). Started in `SopnoAssistant.run` when
+  `rules_enabled`.
+
+**`sopno/core/subagents.py`** — multi-agent runners, backing the `subagents.py`
+tools.
+
+- `_AGENT_PROMPTS` — focused system prompts for `researcher`, `coder`, `reviewer`.
+- `_ALLOWED_TOOLS` — per-agent restricted tool allowlist (researcher:
+  search/fetch/read; coder: files/git/terminal; reviewer: read-only).
+- `_schema_for(agent)` — filters `get_schema()` down to the agent's allowlist.
+- `run_subagent(agent, task)` — builds system + user messages, then runs the
+  same Ollama tool-calling loop as the assistant (bounded by
+  `subagents_max_turns`): execute tool calls through the registry (unknown
+  names are answered safely), feed results back, return the final text.
+- `list_agents()` — the available subagent names.
   - volume up/down/mute → `control_volume`
   - system stats / CPU / RAM / battery → `get_system_stats`
   - lock screen → `lock_screen`
@@ -421,7 +456,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 73 tools:
+ the LLM (OpenAI-style `function` objects). It defines 79 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -486,6 +521,12 @@ This is the most important file in the project. It:
 | `note_write` | Save a markdown note (confirmed) | `title`, `content` |
 | `note_list` | List saved notes | — |
 | `note_search` | Keyword-search the notes | `query` |
+| `rule_add` | Create "if X then Y" rule (confirmed once) | `name`, `condition`, `action` |
+| `rule_list` | List the automation rules | — |
+| `rule_remove` | Delete an automation rule (confirmed) | `rule_id` |
+| `rule_set_enabled` | Arm/pause a rule (disabling confirmed) | `rule_id`, `enabled` |
+| `run_subagent` | Delegate to researcher / coder / reviewer | `agent`, `task` |
+| `subagent_list` | List the available subagents | — |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -720,6 +761,23 @@ domain:
     with a separate overwrite confirmation.
   - `note_list()` — names + sizes + mtimes; `note_search(query)` — read-only
     case-insensitive grep returning matching line snippets.
+- **`rules.py`** — automation rules ("if X then Y"), backed by
+  `sopno/core/rules.py`.
+  - `rule_add(name, condition, action)` — condition is an allowlist grammar
+    `metric op value` (metrics: `battery_percent`, `cpu_percent`, `ram_percent`,
+    `disk_free_gb`, `hour_of_day`, `day_of_week`; ops `< <= > >= ==`) — never
+    eval-ed. Action is a tool call like `open_application app="Files"`,
+    validated against the registry. Confirmed once; on fire the action's
+    pending-action gate (if any) is auto-approved.
+  - `rule_list()` read-only; `rule_remove(id)` and
+    `rule_set_enabled(id, enabled)` confirmed.
+- **`subagents.py`** — delegate to focused workers, backed by
+  `sopno/core/subagents.py`.
+  - `run_subagent(agent, task)` — researcher (search/fetch/read), coder
+    (files/git/terminal), or reviewer (read-only files/git/logs). Each has a
+    focused system prompt and a **restricted** `TOOLS_SCHEMA`; runs the same
+    Ollama tool-calling loop as the main assistant and returns plain text.
+  - `subagent_list()` — names of the available subagents.
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -764,7 +822,15 @@ widgets in `widgets/`, and the look & feel in `visuals/`.
   animated robot face, status label + listening-mode chip, the chat thread, the
   Voice|Text mode toggle, the text composer dock, a small log line, and a resize
   grip. Spawns `AssistantWorker` in a daemon thread and wires its Qt signals to UI
-  methods. `position_hud()` pins it to the top-right of the screen.
+  methods. `position_hud()` pins it to the top-right of the screen. The `≡`
+  chrome button toggles the read-only `DashboardPanel`.
+- **`dashboard.py`** — `DashboardPanel(QTabWidget)`: five read-only tabs backed
+  by the same live objects the CLI uses — **Settings** (`config.json` + the
+  runtime `settings` snapshot, secret-looking values masked), **Memory**
+  (`MemoryStore.stats()` + top memories), **Tools** (all `get_registered_names()`),
+  **Logs** (live stream fed by the worker's `log_message` signal via
+  `append_log`), and **Models** (Ollama `list()`, guarded). `refresh()`
+  re-reads the static tabs each time the panel is shown.
 - **`worker.py`** — `AssistantWorker(QObject)`: the bridge between the assistant
   thread and Qt's signal/slot system. Emits `status_changed`, `speech_detected`,
   `reply_generated`, `log_message`; proxies mode / listen-mode / text input to the
@@ -931,6 +997,11 @@ All settings live in **`config.json`** at the repo root and are read by
 | `email_password_env` | `SOPNO_EMAIL_PASSWORD` | Env var that holds the password (never config.json) |
 | `calendar_dir` | `sopno/memory/calendar` | Folder of `.ics` calendar files |
 | `notes_dir` | `sopno/memory/notes` | Markdown notes folder |
+| `rules_enabled` | `true` | Master switch for the automation-rule poller |
+| `rules_path` | `sopno/memory/rules.db` | SQLite DB holding the rules |
+| `rules_poll_seconds` | `60` | How often the `RulePoller` checks conditions |
+| `subagents_enabled` | `true` | Allow `run_subagent` |
+| `subagents_max_turns` | `4` | Cap on tool-calling iterations per subagent |
 
 ---
 

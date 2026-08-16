@@ -394,6 +394,20 @@ store reopen; malformed `when` → friendly error.
   same `_process_command`-style loop with a focused system prompt + restricted
   `TOOLS_SCHEMA`; results returned as text. Skip until #1–#6 are stable.
 
+> **✅ IMPLEMENTED (Step 22, Aug 16 2026):** three systems. **Automation rules**
+> (`sopno/core/rules.py` + `rules` tools) — "if `metric op value` then `tool key="v"`"
+> persisted in SQLite; conditions are an allowlist grammar (battery_percent,
+> cpu_percent, ram_percent, disk_free_gb, hour_of_day, day_of_week) — never
+> eval-ed; a `RulePoller` daemon fires each rule once per true-period and
+> auto-approves pending-action gates the action raises (one-time rule
+> confirmation). **Multi-agent** (`sopno/core/subagents.py` + `run_subagent`)
+> — researcher / coder / reviewer subagents, focused prompts + restricted
+> `TOOLS_SCHEMA`, same Ollama tool-calling loop, text results. **GUI
+> dashboard** (`sopno/ui/hud/dashboard.py`) — read-only Settings / Memory /
+> Tools / Logs / Models tabs toggled by a `≡` chrome button, backed by the
+> same config, MemoryStore, registry, and Ollama objects the CLI uses. 6 tools
+> (73 → 79), 27 tests → suite at 489. This completes the roadmap.
+
 ---
 
 ## Dependency & safety summary

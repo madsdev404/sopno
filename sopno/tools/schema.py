@@ -1133,6 +1133,115 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "rule_add",
+            "description": "Create an automation rule 'if {condition} then {action}', confirmed once. Condition is a metric compared with < <= > >= ==, e.g. 'battery_percent < 20' or 'hour_of_day >= 21'. Metrics: battery_percent, cpu_percent, ram_percent, disk_free_gb, hour_of_day, day_of_week (0=Monday..6=Sunday). Action is a registered tool with key=value args, e.g. open_application app=\"Files\" or note_write title=\"daily\" content=\"...\". The rule acts automatically whenever the condition is true.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Short rule name."
+                    },
+                    "condition": {
+                        "type": "string",
+                        "description": "e.g. 'battery_percent < 20'."
+                    },
+                    "action": {
+                        "type": "string",
+                        "description": "Tool call, e.g. 'open_application app=\"Files\"'."
+                    }
+                },
+                "required": ["name", "condition", "action"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rule_list",
+            "description": "List the automation rules with their conditions, actions, and fire counts.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rule_remove",
+            "description": "Delete an automation rule. Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rule_id": {
+                        "type": "integer",
+                        "description": "The rule id from rule_list."
+                    }
+                },
+                "required": ["rule_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "rule_set_enabled",
+            "description": "Enable or disable an automation rule (disabling is confirmed).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "rule_id": {
+                        "type": "integer",
+                        "description": "The rule id from rule_list."
+                    },
+                    "enabled": {
+                        "type": "boolean",
+                        "description": "True to arm the rule, False to pause it."
+                    }
+                },
+                "required": ["rule_id", "enabled"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "run_subagent",
+            "description": "Delegate a focused task to a subagent (researcher / coder / reviewer). The researcher finds source-backed facts, the coder inspects and modifies the codebase, the reviewer reviews code read-only. Returns the subagent's text answer.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "agent": {
+                        "type": "string",
+                        "enum": ["researcher", "coder", "reviewer"],
+                        "description": "Which subagent to run."
+                    },
+                    "task": {
+                        "type": "string",
+                        "description": "What to do, described precisely."
+                    }
+                },
+                "required": ["agent", "task"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "subagent_list",
+            "description": "List the available subagents.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {

@@ -26,6 +26,7 @@ from PyQt5.QtWidgets import (
 
 from sopno.config.settings import settings
 from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, StatusMixin, TrayMixin
+from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MAX_SIZE, MIN_SIZE
 from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle
@@ -62,6 +63,9 @@ class SopnoHUDWindow(
         self.worker.speech_detected.connect(self.update_user_speech)
         self.worker.reply_generated.connect(self.update_sopno_reply)
         self.worker.log_message.connect(self.update_log)
+        self.worker.log_message.connect(
+            lambda msg: self.dashboard.append_log(msg) if self.dashboard else None
+        )
         self.thread.start()
 
     def init_ui(self) -> None:
@@ -136,11 +140,18 @@ class SopnoHUDWindow(
         )
         self.hide_btn.clicked.connect(self.hide_hud)
 
+        self.dashboard_btn = self._chrome_btn(
+            "≡", "#5EC1F5", "Dashboard — settings, memory, tools, logs, models",
+            size=22, font_size=12,
+        )
+        self.dashboard_btn.clicked.connect(self.toggle_dashboard)
+
         self.close_btn = self._chrome_btn(
             "×", "#F07178", "Close", size=22, font_size=14,
         )
         self.close_btn.clicked.connect(self.close_app)
 
+        chrome.addWidget(self.dashboard_btn, 0, Qt.AlignVCenter)
         chrome.addWidget(self.hide_btn, 0, Qt.AlignVCenter)
         chrome.addWidget(self.close_btn, 0, Qt.AlignVCenter)
 
@@ -190,6 +201,16 @@ class SopnoHUDWindow(
         self.chat.setMinimumHeight(80)
         root.addWidget(self.chat, 1)
         root.addSpacing(10)
+
+        # ── Read-only dashboard (settings / memory / tools / logs / models) ──
+        self.dashboard = None
+        try:
+            self.dashboard = DashboardPanel()
+            root.addWidget(self.dashboard, 0)
+            self.dashboard.setVisible(False)
+        except Exception:  # noqa: BLE001
+            self.dashboard = None
+            self.dashboard_btn.setVisible(False)
 
         # ── Mode toggle (Voice | Text) ─────────────────────────────────────────
         self.mode_toggle = ModeToggle()
@@ -306,6 +327,14 @@ class SopnoHUDWindow(
     def position_hud(self) -> None:
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.x() + screen.width() - self.width() - 36, screen.y() + 56)
+
+    def toggle_dashboard(self) -> None:
+        if not self.dashboard:
+            return
+        show = not self.dashboard.isVisible()
+        if show:
+            self.dashboard.refresh()
+        self.dashboard.setVisible(show)
 
     def close_app(self) -> None:
         if hasattr(self, "worker") and self.worker:

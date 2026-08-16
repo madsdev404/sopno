@@ -132,3 +132,8 @@ sopno/memory/memory.db-shm
 sopno/memory/reminders.db
 sopno/memory/reminders.db-wal
 sopno/memory/reminders.db-shm
+
+# Automation rules database (user data — never commit)
+sopno/memory/rules.db
+sopno/memory/rules.db-wal
+sopno/memory/rules.db-shm

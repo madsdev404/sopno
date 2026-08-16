@@ -81,6 +81,13 @@ from sopno.tools.builtins.vision import describe_screenshot, ocr_image
 from sopno.tools.builtins.email import email_read, email_send
 from sopno.tools.builtins.calendar import calendar_list, calendar_create_event
 from sopno.tools.builtins.notes import note_write, note_list, note_search
+from sopno.tools.builtins.rules import (
+    rule_add,
+    rule_list,
+    rule_remove,
+    rule_set_enabled,
+)
+from sopno.tools.builtins.subagents import run_subagent, subagent_list
 from sopno.llm.researcher import research
 
 
@@ -151,6 +158,12 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "note_write": note_write,
     "note_list": note_list,
     "note_search": note_search,
+    "rule_add": rule_add,
+    "rule_list": rule_list,
+    "rule_remove": rule_remove,
+    "rule_set_enabled": rule_set_enabled,
+    "run_subagent": run_subagent,
+    "subagent_list": subagent_list,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

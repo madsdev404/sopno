@@ -192,6 +192,20 @@ class Settings:
         self.calendar_dir: str = data.get("calendar_dir", "sopno/memory/calendar")
         self.notes_dir: str = data.get("notes_dir", "sopno/memory/notes")
 
+        # ── Automation rules ──────────────────────────────────
+        # "if {condition} then {action}" rules persisted in SQLite and checked
+        # by a background poller.
+        self.rules_enabled: bool = bool(data.get("rules_enabled", True))
+        self.rules_path: Path = Path(data.get("rules_path", "sopno/memory/rules.db"))
+        if not self.rules_path.is_absolute():
+            self.rules_path = _PROJECT_ROOT / self.rules_path
+        self.rules_poll_seconds: float = float(data.get("rules_poll_seconds", 60))
+
+        # ── Subagents (multi-agent) ──────────────────────────
+        # Focused researcher / coder / reviewer workers with restricted tools.
+        self.subagents_enabled: bool = bool(data.get("subagents_enabled", True))
+        self.subagents_max_turns: int = int(data.get("subagents_max_turns", 4))
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

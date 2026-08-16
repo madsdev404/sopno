@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Vision, Email, Calendar & Notes
+* **Latest Completed Upgrade:** Automation Rules, Subagents & GUI Dashboard
 
 ---
 
@@ -123,9 +123,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Notes / knowledge base:** `note_write(title, content)` — markdown under `notes_dir` (confirmed, overwrite confirmed); `note_list()` and `note_search(query)` — read-only grep.
 * [x] **Config:** `vision_enabled` / `vision_model` / `email_*` / `calendar_dir` / `notes_dir`.
 
+### 17. Automation Rules, Subagents & GUI Dashboard — **[COMPLETED]**
+* [x] **Automation rules:** `rule_add(name, condition, action)` — "if X then Y" persisted in SQLite (`rules.db`, WAL, gitignored). Conditions are an allowlist of numeric metrics (`battery_percent`, `cpu_percent`, `ram_percent`, `disk_free_gb`, `hour_of_day`, `day_of_week`) compared with `< <= > >= ==` — **never eval-ed**. Actions are existing registered tools (e.g. `open_application app="Files"`). A background `RulePoller` thread checks every `rules_poll_seconds` and fires each rule **once per true-period** (no spamming while the condition stays true). The rule is confirmed once at creation; on fire, any pending-action gate the action raises is auto-approved.
+* [x] **Rule tools:** `rule_list()` read-only, `rule_remove(id)` confirmed, `rule_set_enabled(id, enabled)` (disabling confirmed). All gated behind the shared `rules_enabled` master switch.
+* [x] **Multi-agent:** `run_subagent(agent, task)` — researcher / coder / reviewer subagents, each with a focused system prompt and a **restricted tool schema** (researcher: search/fetch/read; coder: files/git/terminal; reviewer: read-only files/git/logs). They run the same Ollama tool-calling loop as the main assistant but return plain text. `subagent_list()` lists them; `subagents_enabled` + `subagents_max_turns` bound them.
+* [x] **GUI dashboard:** `≡` button in the HUD chrome toggles a read-only `DashboardPanel` (5 tabs) backed by the same live objects the CLI uses — **Settings** (config.json + runtime settings, secrets masked), **Memory** (MemoryStore stats + important memories), **Tools** (all 79 registered tools), **Logs** (live stream from the assistant), **Models** (Ollama list). Nothing editable in the panel.
+* [x] **Config:** `rules_enabled` / `rules_path` / `rules_poll_seconds` / `subagents_enabled` / `subagents_max_turns`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 22: Automation Rules, Subagents & GUI Dashboard
+* **Added Files:** `sopno/core/rules.py`, `sopno/core/subagents.py`, `sopno/tools/builtins/rules.py`, `sopno/tools/builtins/subagents.py`, `sopno/ui/hud/dashboard.py`, `tests/test_rules.py`, `tests/test_subagents.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/core/assistant.py`, `sopno/ui/hud/window.py`, `doc/CODEBASE.md`, `doc/roadmap/implementation-plan.md`
+* **Impact:** Three systems close out the plan. **Automation rules** (`sopno/core/rules.py`) — "if `battery_percent < 20` then `open_application app="Files"`"-style rules in SQLite with an allowlist condition grammar (never `eval`), a `RulePoller` daemon that fires each rule once per true-period and auto-approves pending-action gates the action raises (the rule itself was the one-time confirmation), plus `rule_add`/`rule_list`/`rule_remove`/`rule_set_enabled` tools. **Multi-agent** (`sopno/core/subagents.py`) — researcher / coder / reviewer subagents with focused prompts and restricted tool schemas, running the same Ollama tool-calling loop as the main assistant and returning plain text (`run_subagent` + `subagent_list` tools). **GUI dashboard** (`sopno/ui/hud/dashboard.py`) — a read-only 5-tab panel (Settings / Memory / Tools / Logs / Models) toggled by a `≡` chrome button, reading the same settings, config.json (secrets masked), MemoryStore, registry, and Ollama list the CLI uses; logs stream live from the assistant's `log_message` signal. 6 new tools (73 → 79), 27 new tests → suite at 489.
 
 ### [August 16, 2026] — Step 21: Vision, Email, Calendar & Notes
 * **Added Files:** `sopno/tools/builtins/vision.py`, `sopno/tools/builtins/email.py`, `sopno/tools/builtins/calendar.py`, `sopno/tools/builtins/notes.py`, `tests/test_vision.py`, `tests/test_email.py`, `tests/test_calendar.py`, `tests/test_notes.py`
