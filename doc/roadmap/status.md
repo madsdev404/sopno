@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Scheduler & Reminders
+* **Latest Completed Upgrade:** MCP Support + Plugin System
 
 ---
 
@@ -83,9 +83,35 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Background Poller:** daemon thread in `SopnoAssistant.run()` delivers due reminders into the reply flow every `reminders_poll_seconds` (30s); delivery is atomic (at-least-once, fires exactly once) and serialized with speech via a lock so a reminder never cuts off a reply.
 * [x] **Safety Caps:** `reminders_max` pending (50), `reminders_max_horizon_days` (365); `reminders_enabled` master switch.
 
+### 12. Browser Automation (Playwright) — **[COMPLETED]**
+* [x] **Opt-In Master Switch:** `browser_enabled` defaults to `false` (Playwright + Chromium are heavy); when off — or Playwright isn't installed — the tools answer with a friendly message instead of failing.
+* [x] **Navigation + Text Snapshot:** `browser_navigate(url)` opens a page (https assumed) and returns a cheap text snapshot — title, body text, and `[0] …`-indexed interactive elements — instead of vision/screenshots.
+* [x] **Interaction:** `browser_click(selector, index)` (CSS selector or snapshot index), `browser_type(selector, text)` (defaults to first visible input), `browser_extract(selector)`, `browser_back()` — all returning fresh snapshots/text.
+* [x] **Screenshots:** `browser_screenshot(path, full_page)` writes PNGs only inside the file write-roots (`files._authorize`) and asks Yes/No when overwriting.
+* [x] **Security:** `browser_allowed_domains` deny-by-default allowlist; per-step `browser_timeout` (30s); whole-session `browser_task_limit` (120s) ceiling; `image/media/font` requests blocked; page content treated as untrusted. `browser_close()` frees the session.
+* [x] **Tested without Playwright:** all 17 tests use a fake `BrowserSession`, so the logic is fully covered without the heavy dependency.
+
+### 13. MCP Support + Plugin System — **[COMPLETED]**
+* [x] **Dynamic Tool Framework:** `registry.register_tool/unregister_tool` + `schema.register_schema/unregister_schema` let plugins and MCP clients extend the toolset at runtime; the LLM prompt reads `get_schema()` (base + dynamic) every turn.
+* [x] **Plugins:** `sopno/tools/plugins.py` discovers `plugins/<name>/plugin.py`, registers each tool as `<plugin>_<tool>` with its schema, and calls `on_load()`/`on_unload()`. Tools opting into confirmation go through the pending-action Yes/No gate; plugins get no implicit powers (default-deny — file roots, terminal blocklist, confirmations still apply).
+* [x] **MCP Client:** `McpHub` connects to every `mcp_servers` entry (MCP SDK v2, stdio, own daemon event-loop thread), lists tools, and registers them as `<server>_<tool>` — callable by the LLM like built-ins. `refresh()`/`close()` manage the lifecycle.
+* [x] **MCP Server:** `sopno/tools/mcp_server.py` wraps the whole registry as an `MCPServer` — `python -m sopno.tools.mcp_server` lets any MCP host (Claude Desktop, Cursor, opencode) drive Sopno's tools, with Sopno's permission gates intact.
+* [x] **Self-Tested Both Directions:** an in-process MCP server subprocess is driven end-to-end by the client, and Sopno's own client drives its own server (`sopno_get_current_time` worked over the wire).
+* [x] **Config:** `mcp_enabled` / `mcp_servers` / `plugins_enabled` / `plugins_dir`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 18: MCP Support + Plugin System
+* **Added Files:** `sopno/tools/plugins.py`, `sopno/tools/mcp_client.py`, `sopno/tools/mcp_server.py`, `tests/test_plugins.py`, `tests/test_mcp.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/__init__.py`, `sopno/core/assistant.py`, `requirements.txt`, `doc/CODEBASE.md`
+* **Impact:** Sopno's toolset is no longer closed. The registry + schema gained `register/unregister` for dynamic tools, and the LLM prompt reads `get_schema()` every turn, so anything added at startup is immediately callable. **Plugins** are folders under `plugins/` exposing a `plugin_tools()` contract; each tool is namespaced `<plugin>_<tool>`, can opt into the pending-action Yes/No gate, and inherits the default-deny posture (no bypass of file roots / terminal blocklist / confirmations). **MCP** works both ways: as a client, `McpHub` connects to every `mcp_servers` entry over stdio (MCP SDK v2, its own daemon event-loop thread) and registers each remote tool as `<server>_<tool>`; as a server, `python -m sopno.tools.mcp_server` exposes the full registry to any MCP host. Both directions are covered by real stdio tests, including Sopno's client driving Sopno's own server (`sopno_get_current_time` over the wire). 16 new tests → suite at 354.
+
+### [August 16, 2026] — Step 17: Browser Automation (Playwright)
+* **Added Files:** `sopno/tools/builtins/browser.py`, `tests/test_browser.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/builtins/__init__.py`, `sopno/core/assistant.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now browse the web. A lazy singleton `BrowserSession` wraps Playwright Chromium (installed on demand via `browser_enabled: true` + `pip install playwright` + `playwright install chromium`); the LLM drives it through 7 discrete tools. `browser_navigate` returns a *text snapshot* (title, body, `[0]…`-indexed interactive elements) so no vision is needed; `browser_click`/`browser_type` target elements by snapshot index or CSS selector; `browser_extract` reads regions; `browser_screenshot` writes PNGs inside the file write-roots (overwrite confirmed); `browser_back`/`browser_close` round it out. Security is deny-by-default: `browser_allowed_domains`, per-step `browser_timeout`, a `browser_task_limit` session ceiling, blocked image/media/font resources, and untrusted-page discipline. Off (or missing Playwright) the tools degrade to a friendly message. 7 new tools (44 total), 17 new tests (fake session, no Playwright needed) → suite at 338.
 
 ### [August 16, 2026] — Step 16: Scheduler & Reminders
 * **Added Files:** `sopno/core/reminders.py`, `sopno/tools/builtins/reminders.py`, `tests/test_reminders.py`

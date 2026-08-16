@@ -119,6 +119,29 @@ class Settings:
         self.reminders_max: int = int(data.get("reminders_max", 50))
         self.reminders_max_horizon_days: int = int(data.get("reminders_max_horizon_days", 365))
 
+        # ── Browser automation (Playwright) ───────────────────
+        # Opt-in: Playwright + a downloaded Chromium are heavy, so the master
+        # switch defaults to false. When off (or Playwright missing) the tools
+        # answer with a friendly message instead of failing.
+        self.browser_enabled: bool = bool(data.get("browser_enabled", False))
+        # Deny-by-default: navigation is refused outside these domains.
+        self.browser_allowed_domains: list[str] = [
+            str(d) for d in data.get("browser_allowed_domains", [])
+        ]
+        # Per-step timeout (seconds) and whole-session lifespan ceiling.
+        self.browser_timeout: int = int(data.get("browser_timeout", 30))
+        self.browser_task_limit: int = int(data.get("browser_task_limit", 120))
+        self.browser_headless: bool = bool(data.get("browser_headless", True))
+
+        # ── MCP + Plugins ─────────────────────────────────────
+        # Sopno as an MCP client: dict of {name: {command, args, env}} servers
+        # whose tools are exposed as <server>_<tool> (empty = disabled).
+        self.mcp_enabled: bool = bool(data.get("mcp_enabled", True))
+        self.mcp_servers: dict = data.get("mcp_servers", {}) or {}
+        # Dynamic plugins: folders under plugins_dir with a plugin.py contract.
+        self.plugins_enabled: bool = bool(data.get("plugins_enabled", True))
+        self.plugins_dir: str = data.get("plugins_dir", "plugins")
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

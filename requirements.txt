@@ -24,6 +24,13 @@ ddgs
 trafilatura
 sqlite-vec
 
+# Optional browser automation (opt-in: set browser_enabled=true in config.json;
+# also run 'playwright install chromium' once)
+# playwright
+
+# MCP client/server SDK (mcp_servers in config.json)
+mcp
+
 # Terminal access (persistent shell via cleat)
 cleat
 

@@ -23,7 +23,7 @@ from sopno.core.dispatcher import CommandDispatcher
 from sopno.core.reminders import ReminderPoller, ReminderStore, set_store as set_reminder_store
 from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
-from sopno.tools.schema import TOOLS_SCHEMA
+from sopno.tools.schema import get_schema
 from sopno.tools.registry import execute_tool
 from sopno.tools.builtins.terminal import _close as close_terminal_shell
 from sopno.tools.builtins.files import pending_action, resolve_pending
@@ -50,6 +50,7 @@ _TOOLISH = re.compile(
     r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes?|"
     r"copy|duplicate|move|find|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
     r"remind|reminder|reminders|timer|alert|schedule|remind me|"
+    r"browse|browser|open (a )?website|go to website|navigate|website|webpage|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",
@@ -219,6 +220,25 @@ class SopnoAssistant:
         # Serializes speech so a fired reminder never overlaps a spoken reply.
         self._speech_lock = threading.Lock()
 
+        # Dynamic tools: plugins + MCP clients, loaded at startup so the LLM
+        # schema (get_schema()) includes them from the first turn.
+        self._mcp_hub = None
+        if getattr(settings, "plugins_enabled", True):
+            try:
+                from sopno.tools.plugins import load_plugins
+                loaded = load_plugins()
+                if loaded:
+                    self.on_log_message(f"[Plugins] loaded: {', '.join(loaded)}")
+            except Exception as e:  # noqa: BLE001
+                self.on_log_message(f"[Plugins] failed to load: {e}")
+        if getattr(settings, "mcp_enabled", True) and getattr(settings, "mcp_servers", {}):
+            try:
+                from sopno.tools.mcp_client import McpHub
+                self._mcp_hub = McpHub(settings.mcp_servers)
+                self.on_log_message(f"[MCP] {self._mcp_hub.refresh()}")
+            except Exception as e:  # noqa: BLE001
+                self.on_log_message(f"[MCP] failed to connect: {e}")
+
         # Listening mode: "wake_word" gates on wake word; "always_on" uses continuous VAD
         self.listening_mode = getattr(settings, "listening_mode", "wake_word")
         self._wake_detector: Optional[WakeWordDetector] = None
@@ -234,6 +254,12 @@ class SopnoAssistant:
         self.running = False
         close_terminal_shell()
         self.reminder_store.close()
+        if self._mcp_hub is not None:
+            try:
+                self._mcp_hub.close()
+            except Exception:  # noqa: BLE001
+                pass
+            self._mcp_hub = None
         self._text_event.set()
 
     def set_interaction_mode(self, mode: str) -> None:
@@ -593,7 +619,7 @@ class SopnoAssistant:
         try:
             response = llm_chat(
                 chat_messages,
-                tools=TOOLS_SCHEMA if use_tools else None,
+                tools=get_schema() if use_tools else None,
             )
 
             response_msg = message_as_dict(response["message"])

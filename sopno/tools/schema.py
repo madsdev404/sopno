@@ -5,9 +5,16 @@ JSON schemas for the LLM tool-calling API.
 
 These define what functions Sopno has access to, what arguments they expect,
 and when the AI should invoke them.
+
+``TOOLS_SCHEMA`` is the static base set. Dynamic tools (plugins, MCP clients)
+are appended at runtime via ``register_schema`` / ``unregister_schema`` and
+included in the snapshot returned by ``get_schema()`` — the LLM prompt must
+always use ``get_schema()`` so the dynamic tools are visible.
 """
 
-TOOLS_SCHEMA = [
+from typing import Any
+
+TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
@@ -504,6 +511,127 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "browser_navigate",
+            "description": "Open a web page (only domains in browser_allowed_domains) and return a text snapshot: page title, body text, and indexed interactive elements ([0] …) you can click or type into.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The URL to open (https:// is assumed if omitted)."
+                    }
+                },
+                "required": ["url"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_click",
+            "description": "Click an element on the current page. Use the index from the interactive-elements snapshot (selector may be empty), or a CSS selector.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector (optional — empty uses the snapshot index)."
+                    },
+                    "index": {
+                        "type": "integer",
+                        "description": "Element index within the selector match or the snapshot list (default 0)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_type",
+            "description": "Type text into an input or textarea on the current page.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector (empty = first visible input/textarea)."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "The text to type."
+                    }
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_extract",
+            "description": "Read the (capped) text of a region of the current page — empty selector reads the whole body.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "selector": {
+                        "type": "string",
+                        "description": "CSS selector (optional)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_screenshot",
+            "description": "Save a PNG screenshot of the current page. The path must be inside the allowed file write roots; overwriting an existing file asks for confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute PNG path."
+                    },
+                    "full_page": {
+                        "type": "boolean",
+                        "description": "Capture the full scrollable page (default false)."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_back",
+            "description": "Go back to the previous page and return a new snapshot.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "browser_close",
+            "description": "Close the browser session (frees the Playwright process).",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {
@@ -740,3 +868,28 @@ TOOLS_SCHEMA = [
         }
     }
 ]
+
+# Dynamic schemas appended at runtime (plugins, MCP clients).
+_DYNAMIC: list[dict[str, Any]] = []
+
+
+def register_schema(schema: dict[str, Any]) -> None:
+    """Add a function-schema dict to the dynamic set (idempotent by name)."""
+    name = schema.get("function", {}).get("name")
+    if not name:
+        return
+    unregister_schema(name)
+    _DYNAMIC.append(schema)
+
+
+def unregister_schema(name: str) -> None:
+    """Remove a dynamic schema by its function name."""
+    for i, s in enumerate(_DYNAMIC):
+        if s.get("function", {}).get("name") == name:
+            del _DYNAMIC[i]
+            return
+
+
+def get_schema() -> list[dict[str, Any]]:
+    """Full tool schema: static base + currently registered dynamic tools."""
+    return TOOLS_SCHEMA + list(_DYNAMIC)

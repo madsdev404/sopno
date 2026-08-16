@@ -43,6 +43,15 @@ from sopno.tools.builtins.git import (
     git_commit_message,
 )
 from sopno.tools.builtins.reminders import set_reminder, list_reminders, cancel_reminder
+from sopno.tools.builtins.browser import (
+    browser_navigate,
+    browser_click,
+    browser_type,
+    browser_extract,
+    browser_screenshot,
+    browser_back,
+    browser_close,
+)
 from sopno.llm.researcher import research
 
 
@@ -77,6 +86,13 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "set_reminder": set_reminder,
     "list_reminders": list_reminders,
     "cancel_reminder": cancel_reminder,
+    "browser_navigate": browser_navigate,
+    "browser_click": browser_click,
+    "browser_type": browser_type,
+    "browser_extract": browser_extract,
+    "browser_screenshot": browser_screenshot,
+    "browser_back": browser_back,
+    "browser_close": browser_close,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,
@@ -86,6 +102,15 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "git_stash": git_stash,
     "git_commit_message": git_commit_message,
 }
+
+# Snapshot of the built-in names at import time — used to distinguish
+# dynamically registered tools (plugins, MCP clients) from built-ins.
+_BASE_NAMES: frozenset[str] = frozenset(_REGISTRY.keys())
+
+
+def is_builtin(name: str) -> bool:
+    """True if `name` is a statically defined tool (not a dynamic plugin/MCP one)."""
+    return name in _BASE_NAMES
 
 
 def execute_tool(name: str, arguments: dict[str, Any]) -> str:
@@ -111,6 +136,22 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> str:
         return f"Error: Invalid arguments for tool '{name}' — {te}"
     except Exception as e:
         return f"Error executing tool '{name}': {e}"
+
+
+def register_tool(name: str, fn: Callable[..., str]) -> None:
+    """
+    Dynamically register a tool (plugins, MCP clients). Overwrites if present.
+
+    Args:
+        name: The tool's schema name.
+        fn: Callable that accepts keyword arguments and returns a string.
+    """
+    _REGISTRY[name] = fn
+
+
+def unregister_tool(name: str) -> None:
+    """Remove a dynamically registered tool. Built-ins are left untouched."""
+    _REGISTRY.pop(name, None)
 
 
 def get_registered_names() -> list[str]:

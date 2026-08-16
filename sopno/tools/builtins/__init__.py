@@ -21,6 +21,7 @@ Files:
   - files.py         → read_file, write_file, edit_file, list_directory, delete_file, rename_file, copy_file, move_file, search_files
   - readers.py       → binary document readers (PDF / image OCR / Office) used by read_file
   - reminders.py     → set_reminder, list_reminders, cancel_reminder (SQLite + poller in core)
+  - browser.py       → browser_navigate/click/type/extract/screenshot/back/close (Playwright, opt-in)
   - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 

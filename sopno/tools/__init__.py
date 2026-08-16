@@ -14,6 +14,11 @@ framework.
 """
 
 from sopno.tools.registry import execute_tool, get_registered_names
-from sopno.tools.schema import TOOLS_SCHEMA
+from sopno.tools.schema import TOOLS_SCHEMA, get_schema
 
-__all__ = ["execute_tool", "get_registered_names", "TOOLS_SCHEMA"]
+__all__ = [
+    "execute_tool",
+    "get_registered_names",
+    "TOOLS_SCHEMA",
+    "get_schema",
+]

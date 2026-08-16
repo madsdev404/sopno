@@ -231,6 +231,19 @@ store reopen; malformed `when` → friendly error.
 
 **Deps:** `playwright` (pip) + `playwright install chromium` (one-time).
 
+> **✅ IMPLEMENTED (Step 17, Aug 16 2026):** `sopno/tools/builtins/browser.py`
+> + `tests/test_browser.py` (17 tests). Lazy singleton `BrowserSession`; tools
+> `browser_navigate` (text snapshot: title + body + `[0]…`-indexed interactive
+> elements), `browser_click(selector, index)`, `browser_type(selector, text)`,
+> `browser_extract(selector)`, `browser_screenshot(path, full_page)` (write-root
+> + overwrite confirm), `browser_back`, `browser_close`. Security:
+> `browser_allowed_domains` deny-by-default, `browser_timeout`,
+> `browser_task_limit` session ceiling, `image/media/font` blocked, untrusted
+> page content. `browser_enabled` defaults to **false** (opt-in; graceful
+> message when Playwright is missing). Config keys:
+> `browser_enabled`/`browser_allowed_domains`/`browser_timeout`/
+> `browser_task_limit`/`browser_headless`. Suite → 338.
+
 ### 6. MCP Support + Plugin System
 
 **Research findings**
@@ -258,6 +271,19 @@ store reopen; malformed `when` → friendly error.
 
 **Config keys:** `mcp_servers` ({}), `mcp_enabled` (true),
 `plugins_enabled` (true), `plugins_dir` (project/plugins).
+
+> **✅ IMPLEMENTED (Step 18, Aug 16 2026):** `sopno/tools/plugins.py` +
+> `sopno/tools/mcp_client.py` + `sopno/tools/mcp_server.py` +
+> `tests/test_plugins.py` + `tests/test_mcp.py` (16 tests). Registry/schema
+> gained `register/unregister` for dynamic tools; the LLM prompt uses
+> `get_schema()` so plugin/MCP tools are visible from the first turn. Plugin
+> contract: `plugin_tools() -> {name: (fn, schema)}`, namespaced
+> `<plugin>_<tool>`, optional confirm gate, `on_load`/`on_unload`, default-deny
+> (no bypass of file roots / blocklist / confirmations). MCP client `McpHub`
+> connects to `mcp_servers` over stdio (SDK v2, own event-loop thread) and
+> registers `<server>_<tool>`; MCP server `python -m sopno.tools.mcp_server`
+> exposes the full registry to any host. Both directions tested over real stdio
+> (client↔server, and Sopno client driving Sopno server). Suite → 354.
 
 ### 7. Desktop Control + Hardware
 

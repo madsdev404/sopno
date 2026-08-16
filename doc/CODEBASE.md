@@ -421,7 +421,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 37 tools:
+ the LLM (OpenAI-style `function` objects). It defines 44 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -450,6 +450,13 @@ This is the most important file in the project. It:
 | `set_reminder` | Set a one-shot reminder (non-destructive) | `when`, `text` |
 | `list_reminders` | List upcoming + recent reminders | — |
 | `cancel_reminder` | Cancel a pending reminder by id | `id` |
+| `browser_navigate` | Open a page → text snapshot (title/body/interactive index) | `url` |
+| `browser_click` | Click an element (CSS selector or snapshot index) | `selector`, `index` |
+| `browser_type` | Type into an input/textarea | `selector`, `text` |
+| `browser_extract` | Read text from a page region | `selector` |
+| `browser_screenshot` | Save a PNG screenshot (write-root + confirm) | `path`, `full_page` |
+| `browser_back` | Go back to the previous page | — |
+| `browser_close` | Close the browser session | — |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -468,7 +475,46 @@ This is the most important file in the project. It:
 - `_REGISTRY` dict (name → callable) importing each skill from `builtins/`.
 - `execute_tool(name, arguments)` — runs a registered tool, spreading the argument
   dict; wraps errors into friendly spoken strings.
+- `register_tool(name, fn)` / `unregister_tool(name)` — dynamic tools (plugins,
+  MCP clients) extend the registry at runtime; `is_builtin(name)` distinguishes
+  them from the static base set.
 - `get_registered_names()` — list of registered tools.
+
+**`sopno/tools/schema.py`** — JSON schemas for the LLM.
+
+- `TOOLS_SCHEMA` — the static base list; `register_schema()` /
+  `unregister_schema()` append/remove dynamic tool schemas at runtime.
+- `get_schema()` — base + dynamic snapshot; **the assistant prompt always uses
+  this** so plugin/MCP tools are visible to the LLM from the first turn.
+
+**`sopno/tools/plugins.py`** — dynamic plugin loader (opt-in via
+`plugins_enabled`).
+
+- Discovers `plugins/<name>/plugin.py` (or standalone `plugins/<name>.py`).
+- Module contract: `plugin_tools() -> {tool_name: (fn, schema) | {"fn": …,
+  "schema": …, "confirm": bool}}`, plus optional `on_load()` / `on_unload()`,
+  `PLUGIN_NAME`, `PLUGIN_CONFIRM`.
+- Every tool registers as `<plugin>_<tool>` + its schema (namespaced, no
+  collisions); `confirm: true` tools park a pending-action Yes/No gate.
+- Default-deny: plugins get no implicit powers — they can't bypass the file
+  roots, terminal blocklist, or confirmation system.
+
+**`sopno/tools/mcp_client.py`** — Sopno as an MCP *client* (opt-in via
+`mcp_servers` in config).
+
+- `McpHub(servers)` connects to each configured server over stdio (MCP SDK v2,
+  own daemon event-loop thread), lists its tools, and registers each as
+  `<server>_<tool>` via `register_tool` + `register_schema`.
+- Config shape: `"mcp_servers": {"name": {"command": …, "args": […], "env": {}}}`.
+- `refresh()` reconnects/registers; `close()` unregisters and tears down.
+- `_format_result` flattens MCP text/error content into a spoken string.
+
+**`sopno/tools/mcp_server.py`** — Sopno as an MCP *server*.
+
+- `build_server()` wraps every registered tool (built-ins + dynamic) into an
+  `MCPServer`; run as `python -m sopno.tools.mcp_server` so any MCP host
+  (Claude Desktop, Cursor, opencode…) can drive Sopno's skills. Sopno's own
+  permission gates still apply on the wire.
 
 **`sopno/tools/builtins/`** — the skills themselves, one file per skill or small
 domain:
@@ -552,6 +598,24 @@ domain:
     WAL, `pending → delivered | cancelled`), `parse_when`/`format_due`, and
     `ReminderPoller` (daemon thread, every `reminders_poll_seconds`, atomic
     at-least-once delivery into the reply flow; enabled by `reminders_enabled`).
+- **`browser.py`** — browser automation via Playwright (**opt-in**, heavy dep).
+  - Lazy singleton `BrowserSession`; if `browser_enabled` is false or Playwright
+    isn't installed, every tool answers with a friendly message.
+  - `browser_navigate(url)` — adds `https://` if needed, refuses domains outside
+    `browser_allowed_domains`, returns a cheap **text snapshot** (title + body +
+    `[0] …`-indexed interactive elements) instead of screenshots.
+  - `browser_click(selector, index)` — CSS selector, or snapshot index when the
+    selector is empty; `browser_type(selector, text)` fills inputs (defaults to
+    the first visible input); `browser_extract(selector)` reads a region;
+    `browser_back()` returns a fresh snapshot.
+  - `browser_screenshot(path, full_page)` — writes inside the file **write
+    roots** (`files._authorize`); overwriting an existing file parks a pending
+    action and asks Yes/No.
+  - `browser_close()` — tears down the shared session.
+  - Security: `image/media/font` requests are aborted (token/bandwidth savings);
+    per-step `browser_timeout` (30s) and whole-session `browser_task_limit`
+    (120s) ceiling; page content is treated as untrusted (no prompt-injection
+    into actions).
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
