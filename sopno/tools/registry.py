@@ -21,6 +21,14 @@ from sopno.tools.builtins.manage import (
     read_logs,
     manage_cron,
 )
+from sopno.tools.builtins.files import (
+    read_file,
+    write_file,
+    edit_file,
+    list_directory,
+    delete_file,
+    rename_file,
+)
 from sopno.llm.researcher import research
 
 
@@ -43,6 +51,12 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "manage_service": manage_service,
     "read_logs": read_logs,
     "manage_cron": manage_cron,
+    "read_file": read_file,
+    "write_file": write_file,
+    "edit_file": edit_file,
+    "list_directory": list_directory,
+    "delete_file": delete_file,
+    "rename_file": rename_file,
 }
 
 

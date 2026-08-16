@@ -48,5 +48,18 @@
     "chmod -R 777 /", "chmod 777 /",
     "> /dev/sda", "> /dev/sdb", "> /dev/sdc", "> /dev/sdd",
     "of=/dev/sda", "of=/dev/sdb", "of=/dev/sdc"
-  ]
+  ],
+  "file_enabled": true,
+  "file_allowed_read": ["."],
+  "file_allowed_write": ["."],
+  "file_blocked_paths": [
+    ".env", ".env.*", ".env.local", ".git", ".ssh", ".gnupg",
+    ".netrc", ".aws", "id_rsa", "id_dsa", "id_ecdsa",
+    "id_ed25519", "*.pem", "*.key", "credentials.json",
+    "service-account.json", "*.secret", "*.keychain",
+    "config.json", "sopno/memory/memory.db"
+  ],
+  "file_max_size_bytes": 2000000,
+  "file_output_chars": 6000,
+  "file_confirm_writes": true
 }

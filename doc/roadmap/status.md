@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Offline Faster Whisper STT Integration
+* **Latest Completed Upgrade:** File & Folder Access (Permission-Gated)
 
 ---
 
@@ -59,10 +59,22 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Cron:** `manage_cron` — list / add / remove crontab jobs non-interactively; blocked or malformed commands are refused.
 * [x] **Safety:** everything executes through the shared terminal session, so the `terminal_blocklist` and Sopno's privileges apply uniformly.
 
+### 9. File & Folder Access (Permission-Gated) — **[COMPLETED]**
+* [x] **Read Tools:** `read_file` (whole file or head/tail lines, size + output capped) and `list_directory` (sorted entries with type + size).
+* [x] **Write Tools:** `write_file` (create/overwrite), `edit_file` (exact-string replace with a read-before-edit invariant), `delete_file` (single files only), `rename_file` (never overwrites).
+* [x] **Allowlist Roots, Deny-by-Default:** reads allowed only inside `file_allowed_read` and writes only inside `file_allowed_write` (default: the project root) — everything else is refused.
+* [x] **Secret Deny-List:** `.env`, `.git`, `.ssh`, `*.pem`/`*.key`, `credentials.json`, Sopno's own `config.json` and `memory.db` are off-limits even inside the roots.
+* [x] **Symlink-Safe Paths:** every path is `resolve()`d before checking, so `..`/symlinks can't escape the roots.
+* [x] **HUD/CLI Confirmation:** every write/edit/delete/rename parks a pending action and asks the user Yes/No (spoken in voice mode, typed in text mode); `file_confirm_writes` can disable the prompt.
+
 ---
 
 ## 📓 Technical Progress Log
 
+### [August 16, 2026] — Step 12: File & Folder Access (Permission-Gated)
+* **Added Files:** `sopno/tools/builtins/files.py`, `tests/test_files.py`
+* **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/config/settings.py`, `config.json`, `sopno/core/assistant.py`, `sopno/tools/builtins/__init__.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now read and write files and folders — but only where the user grants it. Every operation passes the `_authorize` gate: master switch (`file_enabled`), absolute symlink-resolved path, a secret deny-list (`.env`, `.git`, `.ssh`, `*.pem`/`*.key`, `credentials.json`, `config.json`, `sopno/memory/memory.db`, …), then allowlist roots (`file_allowed_read` / `file_allowed_write`, default project root). Reads are free inside the roots; `write_file` / `edit_file` / `delete_file` / `rename_file` park a pending action and ask the user for a Yes/No confirmation (spoken in voice mode, typed in text mode), resolved in `assistant.py` via `pending_action()` / `resolve_pending()`. `edit_file` enforces a read-before-edit invariant and re-checks uniqueness before writing. Content is capped by `file_max_size_bytes` / `file_output_chars`.
 ### [August 16, 2026] — Step 11: Process / Service / Log / Cron Management
 * **Added Files:** `sopno/tools/builtins/manage.py`, `tests/test_manage.py`
 * **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/core/assistant.py`, `sopno/tools/builtins/terminal.py`, `tests/test_tools.py`, `doc/CODEBASE.md`

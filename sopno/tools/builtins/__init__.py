@@ -16,6 +16,9 @@ Files:
   - search.py        → search_web
   - system.py        → open_application, control_volume, get_system_stats, lock_screen
   - media.py         → play_media_control
+  - terminal.py      → run_terminal, terminal_send, terminal_status
+  - manage.py        → list_processes, kill_process, manage_service, read_logs, manage_cron
+  - files.py         → read_file, write_file, edit_file, list_directory, delete_file, rename_file
 """
 
 __all__: list[str] = []

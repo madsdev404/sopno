@@ -142,6 +142,35 @@ class Settings:
             ],
         )
 
+        # ── File access (permission-gated) ────────────────────
+        # Master switch for the file tools.
+        self.file_enabled: bool = bool(data.get("file_enabled", True))
+        # Roots Sopno may READ. "." (or "<project_root>") = the project root.
+        self.file_allowed_read: list = data.get(
+            "file_allowed_read", [str(_PROJECT_ROOT)]
+        )
+        # Roots Sopno may WRITE / EDIT / DELETE / RENAME in.
+        self.file_allowed_write: list = data.get(
+            "file_allowed_write", [str(_PROJECT_ROOT)]
+        )
+        # Secrets / foot-gun paths that are off-limits even inside the roots.
+        self.file_blocked_paths: list = data.get(
+            "file_blocked_paths",
+            [
+                ".env", ".env.*", ".env.local", ".git", ".ssh", ".gnupg",
+                ".netrc", ".aws", "id_rsa", "id_dsa", "id_ecdsa",
+                "id_ed25519", "*.pem", "*.key", "credentials.json",
+                "service-account.json", "*.secret", "*.keychain",
+                "config.json", "sopno/memory/memory.db",
+            ],
+        )
+        # Largest file the tools may read or write (bytes).
+        self.file_max_size_bytes: int = int(data.get("file_max_size_bytes", 2_000_000))
+        # Characters of file content shown to the LLM per call.
+        self.file_output_chars: int = int(data.get("file_output_chars", 6000))
+        # Ask Yes/No before every write, edit, delete, and rename.
+        self.file_confirm_writes: bool = bool(data.get("file_confirm_writes", True))
+
         # ── Paths ─────────────────────────────────────────────
         self.project_root: Path     = _PROJECT_ROOT
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"

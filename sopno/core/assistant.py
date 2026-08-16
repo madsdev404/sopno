@@ -25,6 +25,7 @@ from sopno.memory.store import MemoryStore
 from sopno.tools.schema import TOOLS_SCHEMA
 from sopno.tools.registry import execute_tool
 from sopno.tools.builtins.terminal import _close as close_terminal_shell
+from sopno.tools.builtins.files import pending_action, resolve_pending
 from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
@@ -45,7 +46,8 @@ _TOOLISH = re.compile(
     r"terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"
     r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
     r"service|cron|log|journal|systemctl|ps aux|list processes|"
-    r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ"
+    r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes?|"
+    r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",
     re.IGNORECASE,
 )
@@ -55,8 +57,7 @@ _TOOLISH = re.compile(
 _POST_SPEAK_SETTLE_S = 0.45
 
 
-# ── Memory intent patterns (English + Bangla) ────────────────────────────────
-# Order of evaluation matters: recall before remember (recall phrases contain
+# ── Memory intent patterns (English + Bangla) ────────────────────────────────# Order of evaluation matters: recall before remember (recall phrases contain
 # "remember"), and remember before forget ("don't forget X" must REMEMBER).
 
 _MEMORY_FORGET_ALL_EN = re.compile(
@@ -167,6 +168,19 @@ def parse_memory_intent(text: str) -> Optional[tuple[str, str]]:
             return ("forget", target) if target else None
 
     return None
+
+
+# ── Pending-action confirmation (English + Bangla) ───────────────────────────
+_YES_RESPONSES = re.compile(
+    r"\b(?:yes|yeah|yep|ok|okay|sure|go ahead|do it|proceed|please do|confirm|allow it)\b",
+    re.IGNORECASE,
+)
+_YES_RESPONSES_BN = re.compile(r"(?<!\w)(?:হ্যাঁ|হ্যা|ঠিক আছে|হুম)(?!\w)|করো|করুন|দাও|অনুমতি")
+_NO_RESPONSES = re.compile(
+    r"\b(?:no|nope|nah|cancel|stop|abort|deny|don'?t|do not|refuse|never mind)\b",
+    re.IGNORECASE,
+)
+_NO_RESPONSES_BN = re.compile(r"(?<!\w)(?:না|থামো|থাম|বাতিল|নিষেধ)(?!\w)")
 
 
 class SopnoAssistant:
@@ -497,7 +511,29 @@ class SopnoAssistant:
             self.context.add_assistant_message(switch_text)
             return True
 
-        # C. Memory commands (fast rule path — before tools / LLM)
+        # C. Pending file-action confirmation (write / edit / delete / rename)
+        pending = pending_action()
+        if pending is not None:
+            is_yes = bool(_YES_RESPONSES.search(cmd_text)
+                          or _YES_RESPONSES_BN.search(cmd_text))
+            is_no = bool(_NO_RESPONSES.search(cmd_text)
+                         or _NO_RESPONSES_BN.search(cmd_text))
+            if is_yes and not is_no:
+                result = resolve_pending(pending["id"], "yes") or "Done."
+                self.on_log_message(f"[File] Confirmed → {result}")
+                self._deliver_reply(result)
+                self.context.add_user_message(cmd_text)
+                self.context.add_assistant_message(result)
+                return True
+            if is_no and not is_yes:
+                result = resolve_pending(pending["id"], "no") or "Cancelled."
+                self.on_log_message(f"[File] Declined → {result}")
+                self._deliver_reply(result)
+                self.context.add_user_message(cmd_text)
+                self.context.add_assistant_message(result)
+                return True
+
+        # D. Memory commands (fast rule path — before tools / LLM)
         memory_reply = self._handle_memory_intent(cmd_text)
         if memory_reply is not None:
             self._deliver_reply(memory_reply)
@@ -505,7 +541,7 @@ class SopnoAssistant:
             self.context.add_assistant_message(memory_reply)
             return True
 
-        # D. Rule-based Dispatcher (Fast path)
+        # E. Rule-based Dispatcher (Fast path)
         self.on_log_message("Checking local system rules dispatcher…")
         tool_output = self.dispatcher.dispatch(cmd_text)
         if tool_output is not None:
@@ -515,7 +551,7 @@ class SopnoAssistant:
             self.context.add_assistant_message(tool_output)
             return True
 
-        # E. LLM Processing — tools only when the phrase looks action-oriented
+        # F. LLM Processing — tools only when the phrase looks action-oriented
         use_tools = bool(_TOOLISH.search(cmd_text))
         if use_tools:
             self.on_log_message("Querying Ollama with tools…")

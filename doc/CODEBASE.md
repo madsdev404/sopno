@@ -377,7 +377,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
-the LLM (OpenAI-style `function` objects). It defines 17 tools:
+ the LLM (OpenAI-style `function` objects). It defines 23 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -394,6 +394,12 @@ the LLM (OpenAI-style `function` objects). It defines 17 tools:
 | `manage_service` | systemctl --user start/stop/restart/… | `action`, `service` |
 | `read_logs` | Journalctl / file-tail log entries | `source`, `unit`, `lines` |
 | `manage_cron` | List/add/remove cron jobs | `action`, `schedule`, `command` |
+| `read_file` | Read a file inside an allowed root | `path`, `lines` |
+| `write_file` | Create/overwrite a file (confirmed) | `path`, `content` |
+| `edit_file` | Exact-string replace (confirmed) | `path`, `old_string`, `new_string` |
+| `list_directory` | List a folder's entries | `path` |
+| `delete_file` | Delete a single file (confirmed) | `path` |
+| `rename_file` | Move/rename a file (confirmed) | `path`, `new_path` |
 | `control_volume` | Volume up/down/mute | `action` |
 | `get_system_stats` | CPU/RAM/battery | — |
 | `lock_screen` | Lock the desktop | — |
@@ -444,6 +450,23 @@ domain:
   - `manage_cron(action, schedule, command)` — list / add / remove crontab jobs
     (installed non-interactively via a temp file); refuses blocked commands and
     validates the schedule.
+- **`files.py`** — permission-gated file & folder access.
+  - `read_file(path, lines)` — file contents (head/tail supported), capped output.
+  - `write_file(path, content)` — create or overwrite; identical writes short-circuit.
+  - `edit_file(path, old_string, new_string)` — exact-string replace; `old_string`
+    must occur exactly once (read-before-edit invariant, re-checked before writing).
+  - `list_directory(path)` — sorted entries with type + size (defaults to project root).
+  - `delete_file(path)` — remove a single file (folders never deleted).
+  - `rename_file(path, new_path)` — move/rename; never overwrites an existing target.
+  - **Permission gate** (`_authorize`), applied to every operation in order:
+    1. master switch `file_enabled`; 2. absolute resolved (symlink-safe) path;
+    3. secret deny-list `file_blocked_paths` (`.env`, `.git`, `.ssh`, `*.pem`,
+    `config.json`, `sopno/memory/memory.db`, …); 4. allowed roots
+    `file_allowed_read` / `file_allowed_write` (default: project root).
+  - **Confirmation**: writes/edits/deletes/renames park a pending action and return
+    a Yes/No prompt; the assistant asks the user (spoken in voice mode, typed in
+    text mode) and resolves via `pending_action()` / `resolve_pending()` in
+    `core/assistant.py`. Disable with `file_confirm_writes: false`.
 - **`datetime_tool.py`** — `get_current_time()` returns e.g.
   "It is 09:41 AM on Thursday, August 13."
 - **`media.py`** — `play_media_control(action)` controls media players via
