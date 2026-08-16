@@ -53,6 +53,8 @@ _TOOLISH = re.compile(
     r"browse|browser|open (a )?website|go to website|navigate|website|webpage|"
     r"clipboard|copy that|screenshot|screen shot|windows?|focus|type |typing|"
     r"keyboard|press |keys?|disk|storage|gpu|graphics|network stats|"
+    r"database|sql|query|install|uninstall|package|apt|pacman|pip|flatpak|"
+    r"ping|traceroute|wifi|firewall|public ip|my ip|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",

@@ -64,6 +64,19 @@ from sopno.tools.builtins.desktop import (
     get_gpu_stats,
     get_network_stats,
 )
+from sopno.tools.builtins.databases import (
+    query_database,
+    explain_schema,
+    backup_database,
+)
+from sopno.tools.builtins.packages import install_package, uninstall_package
+from sopno.tools.builtins.network import (
+    ping_host,
+    traceroute,
+    wifi_scan,
+    public_ip,
+    firewall_status,
+)
 from sopno.llm.researcher import research
 
 
@@ -115,6 +128,16 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "get_disk_stats": get_disk_stats,
     "get_gpu_stats": get_gpu_stats,
     "get_network_stats": get_network_stats,
+    "query_database": query_database,
+    "explain_schema": explain_schema,
+    "backup_database": backup_database,
+    "install_package": install_package,
+    "uninstall_package": uninstall_package,
+    "ping_host": ping_host,
+    "traceroute": traceroute,
+    "wifi_scan": wifi_scan,
+    "public_ip": public_ip,
+    "firewall_status": firewall_status,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

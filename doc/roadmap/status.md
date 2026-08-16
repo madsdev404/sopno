@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Desktop Control + Hardware
+* **Latest Completed Upgrade:** Database, Packages & Networking
 
 ---
 
@@ -109,9 +109,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **X11-first + honest degradation:** every dependency is optional and detected at runtime (friendly "install X" messages); with `desktop_require_x11` true, input/window/clipboard tools refuse on Wayland instead of silently misbehaving. `open_application` honours `desktop_allowed_apps`.
 * [x] **Config:** `desktop_enabled` / `desktop_allowed_apps` / `desktop_require_x11`.
 
+### 15. Database, Packages & Networking — **[COMPLETED]**
+* [x] **Database (SQLite, read-only first):** `query_database(path, sql)` — SELECT/PRAGMA/EXPLAIN run immediately on a `mode=ro` connection; any mutating statement parks a Yes/No gate and runs on a read-write connection. Queries respect the file read-roots + blocked-paths list, rows capped at 30, long cells truncated.
+* [x] **`explain_schema(path)`** — tables, columns, and row counts; **`backup_database(path, destination)`** — live consistent copy via the SQLite backup API (write-root gated, overwrite confirmed, default `<name>.backup.db`).
+* [x] **Packages:** `install_package(name, manager)` — apt/pacman/dnf/pip/flatpak (+ `auto` detection from os-release), always confirmed, runs through the shared terminal (blocklist applies), `sudo -n` for system managers (never hangs on a password prompt). `uninstall_package` is **blocked by default** (`packages_uninstall_allowed`) and confirmed when enabled. Package names are strictly validated (no shell metacharacters, no `..`).
+* [x] **Networking (read-only by default):** `ping_host` (`ping -c 4`), `traceroute` (missing-binary note if absent), `wifi_scan` (nmcli), `public_ip` (**opt-in** via `network_public_ip_enabled`), `firewall_status()` (`ufw status verbose`). The only mutating tool is `firewall_status("on"/"off")` — confirmed, `sudo -n`.
+* [x] **Config:** `database_enabled` / `packages_enabled` / `packages_uninstall_allowed` / `packages_require_sudo` / `network_enabled` / `network_public_ip_enabled`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 20: Database, Packages & Networking
+* **Added Files:** `sopno/tools/builtins/databases.py`, `sopno/tools/builtins/packages.py`, `sopno/tools/builtins/network.py`, `tests/test_databases.py`, `tests/test_packages.py`, `tests/test_network.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/builtins/__init__.py`, `sopno/core/assistant.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Three new skills (10 tools). **databases.py** gives read-only SQLite access: `query_database` runs reads on a `mode=ro` connection and gates any mutating statement behind Yes/No (then executes on a read-write connection); `explain_schema` lists tables/columns/row counts; `backup_database` uses the SQLite backup API (write-root gated, overwrite confirmed). All queries honour the file read-roots + blocked-paths. **packages.py** — `install_package` (apt/pacman/dnf/pip/flatpak, `auto` detection, confirmed, `sudo -n` for system managers) and `uninstall_package` (blocked by default, confirmed when enabled); names strictly validated. **network.py** — read-only `ping_host`, `traceroute`, `wifi_scan`, `firewall_status()`, opt-in `public_ip`; only `firewall_status("on"/"off")` mutates (confirmed, `sudo -n`). Everything routes through the shared terminal so the safety blocklist still applies. 38 new tests → suite at 427.
 
 ### [August 16, 2026] — Step 19: Desktop Control + Hardware
 * **Added Files:** `sopno/tools/builtins/desktop.py`, `tests/test_desktop.py`

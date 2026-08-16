@@ -23,6 +23,9 @@ Files:
   - reminders.py     → set_reminder, list_reminders, cancel_reminder (SQLite + poller in core)
   - browser.py       → browser_navigate/click/type/extract/screenshot/back/close (Playwright, opt-in)
   - desktop.py       → clipboard_get/set, take_screenshot, list_windows, focus_window, send_keys, press_key, get_disk_stats, get_gpu_stats, get_network_stats
+  - databases.py     → query_database (read-only SQLite), explain_schema, backup_database
+  - packages.py      → install_package (confirmed), uninstall_package (blocked by default)
+  - network.py       → ping_host, traceroute, wifi_scan, public_ip (opt-in), firewall_status
   - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 

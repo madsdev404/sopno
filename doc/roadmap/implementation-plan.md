@@ -331,6 +331,23 @@ store reopen; malformed `when` → friendly error.
 
 ## Phase C (order flexible)
 
+> **✅ IMPLEMENTED (Step 20, Aug 16 2026):** three new skills, 10 tools.
+> `databases.py` — read-only SQLite first: `query_database(path, sql)` runs
+> SELECT/PRAGMA/EXPLAIN on a `mode=ro` connection and gates mutating
+> statements behind Yes/No (read-write connection on approval); queries
+> respect file read-roots + blocked-paths; `explain_schema` (tables/columns/
+> row counts); `backup_database` (SQLite backup API, write-root gated,
+> overwrite confirmed). `packages.py` — `install_package(name, manager)`
+> (apt/pacman/dnf/pip/flatpak, auto-detection, confirmed, `sudo -n` for
+> system managers) and `uninstall_package` (blocked by default, confirmed
+> when enabled); strict name validation. `network.py` — read-only
+> `ping_host`/`traceroute`/`wifi_scan`/`firewall_status()`, opt-in
+> `public_ip`; only the firewall on/off toggle mutates (confirmed). All
+> routed through the shared terminal so the blocklist applies. Config:
+> `database_enabled`, `packages_enabled`, `packages_uninstall_allowed`,
+> `packages_require_sudo`, `network_enabled`, `network_public_ip_enabled`.
+> Suite → 427.
+
 ### 8. Database / Packages / Networking
 - `query_database(engine, sql)` — read-only SQLite first (reuse
   `memory.db`-style SQLite; Postgres/MySQL/Mongo later via drivers), **never**

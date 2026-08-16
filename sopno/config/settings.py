@@ -154,6 +154,24 @@ class Settings:
         # X11-only tools refuse on Wayland while true (input/window/clipboard).
         self.desktop_require_x11: bool = bool(data.get("desktop_require_x11", True))
 
+        # ── Database / packages / network ─────────────────────
+        # Database tools: read-only SQLite queries, schema, backups.
+        self.database_enabled: bool = bool(data.get("database_enabled", True))
+        # Package tools: installs are always confirmed.
+        self.packages_enabled: bool = bool(data.get("packages_enabled", True))
+        # Uninstalls are blocked unless the user opts in.
+        self.packages_uninstall_allowed: bool = bool(
+            data.get("packages_uninstall_allowed", False)
+        )
+        # Wrap system manager commands (apt/pacman/dnf) in `sudo -n`.
+        self.packages_require_sudo: bool = bool(data.get("packages_require_sudo", True))
+        # Network tools (ping/traceroute/wifi/firewall) — read-only by default.
+        self.network_enabled: bool = bool(data.get("network_enabled", True))
+        # public_ip calls out to an echo service — opt-in only.
+        self.network_public_ip_enabled: bool = bool(
+            data.get("network_public_ip_enabled", False)
+        )
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

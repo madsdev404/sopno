@@ -421,7 +421,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 54 tools:
+ the LLM (OpenAI-style `function` objects). It defines 64 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -467,6 +467,16 @@ This is the most important file in the project. It:
 | `get_disk_stats` | Partitions/usage + temps + fans (psutil) | — |
 | `get_gpu_stats` | NVIDIA GPU name/util/VRAM/temp (pynvml) | — |
 | `get_network_stats` | Per-interface bytes up/down (psutil) | — |
+| `query_database` | Run SQL on a SQLite file (reads instant, writes confirmed) | `path`, `sql` |
+| `explain_schema` | Tables, columns, row counts of a SQLite file | `path` |
+| `backup_database` | Live consistent SQLite backup (confirmed) | `path`, `destination` |
+| `install_package` | Install via apt/pacman/dnf/pip/flatpak (confirmed) | `name`, `manager` |
+| `uninstall_package` | Remove a package (blocked by default) | `name`, `manager` |
+| `ping_host` | Ping a host 4 times | `host` |
+| `traceroute` | Trace the path to a host (15 hops) | `host` |
+| `wifi_scan` | Nearby Wi-Fi networks via nmcli | — |
+| `public_ip` | WAN IP via echo service (opt-in) | — |
+| `firewall_status` | ufw status, or on/off (confirmed) | `action` |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -645,6 +655,34 @@ domain:
     hard dependency), reports name/util/VRAM/temp or "No NVIDIA GPU detected".
   - `open_application` (in `system.py`) honours `desktop_allowed_apps` when the
     list is non-empty, and `get_system_stats` now appends disk + CPU temperature.
+- **`databases.py`** — read-only SQLite first.
+  - `query_database(path, sql)` — reads (SELECT/PRAGMA/EXPLAIN/WITH) run
+    immediately on a `file:…?mode=ro` URI connection; mutating statements park
+    a pending-action Yes/No gate and execute on a read-write connection when
+    approved. Output capped at 30 rows with truncated cells; paths must pass
+    `files._authorize(path, "read")` (read-roots + blocked-paths apply).
+  - `explain_schema(path)` — tables + columns + row counts from `sqlite_master`.
+  - `backup_database(path, destination)` — live consistent copy via the SQLite
+    backup API (safe for in-use DBs); destination must be inside the write
+    roots, overwrite confirmed, default `<name>.backup.db`.
+- **`packages.py`** — package management, every action confirmed.
+  - `install_package(name, manager)` — `auto` detects apt/pacman/dnf from
+    `/etc/os-release` (fallback pip); explicit managers include flatpak.
+    System managers wrap in `sudo -n` (non-interactive — never hangs, fails
+    with a clear "sudo may need your password" hint). Runs through the shared
+    terminal (`_run_command_raw`), so the safety blocklist applies.
+  - `uninstall_package(name, manager)` — **blocked by default**
+    (`packages_uninstall_allowed = false`), confirmed when enabled.
+  - Names validated against a safe character set (no shell metacharacters, no
+    `..`, length caps).
+- **`network.py`** — networking, read-only by default.
+  - `ping_host(host)` (`ping -c 4`), `traceroute(host)` (`traceroute -m 15`,
+    friendly message if not installed), `wifi_scan()` (`nmcli`), and
+    `firewall_status()` (`ufw status verbose`) are harmless reads.
+  - `public_ip()` calls `curl https://api.ipify.org` (ifconfig.me fallback) and
+    is **disabled unless `network_public_ip_enabled = true`**.
+  - `firewall_status("on"/"off")` is the only mutating path — confirmed and run
+    via `sudo -n ufw <action>`. Host arguments are strictly validated.
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -841,6 +879,12 @@ All settings live in **`config.json`** at the repo root and are read by
 | `desktop_enabled` | `true` | Master switch for the desktop tools (clipboard/windows/keys/screenshot/hardware) |
 | `desktop_allowed_apps` | `[]` | When non-empty, `open_application` only launches apps in this list |
 | `desktop_require_x11` | `true` | When true, input/window/clipboard tools refuse on Wayland |
+| `database_enabled` | `true` | Master switch for the SQLite database tools |
+| `packages_enabled` | `true` | Master switch for the package tools |
+| `packages_uninstall_allowed` | `false` | Allow `uninstall_package` (still confirmed) |
+| `packages_require_sudo` | `true` | Wrap apt/pacman/dnf in `sudo -n` |
+| `network_enabled` | `true` | Master switch for the network tools |
+| `network_public_ip_enabled` | `false` | Allow `public_ip` to call a WAN echo service |
 
 ---
 

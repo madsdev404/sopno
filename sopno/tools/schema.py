@@ -781,6 +781,182 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "query_database",
+            "description": "Run a SQL statement against a SQLite database file. SELECT/PRAGMA/EXPLAIN run immediately; mutating statements ask for confirmation first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the .db file (must be inside the read roots)."
+                    },
+                    "sql": {
+                        "type": "string",
+                        "description": "The SQL statement to run."
+                    }
+                },
+                "required": ["path", "sql"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_schema",
+            "description": "List the tables, columns, and row counts of a SQLite database.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the .db file."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "backup_database",
+            "description": "Make a live, consistent backup copy of a SQLite database. Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the database to back up."
+                    },
+                    "destination": {
+                        "type": "string",
+                        "description": "Output path (defaults to '<name>.backup.db'). Must be inside the write roots."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "install_package",
+            "description": "Install a package through the system manager (apt/pacman/dnf/pip/flatpak). Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The package name."
+                    },
+                    "manager": {
+                        "type": "string",
+                        "description": "auto, apt, pacman, dnf, pip, or flatpak."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "uninstall_package",
+            "description": "Remove a package. Blocked by default (set packages_uninstall_allowed = true to enable). Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The package name."
+                    },
+                    "manager": {
+                        "type": "string",
+                        "description": "auto, apt, pacman, dnf, pip, or flatpak."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ping_host",
+            "description": "Ping a host four times and report the round-trip times.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Hostname or IP address."
+                    }
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "traceroute",
+            "description": "Trace the network path to a host (max 15 hops).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "host": {
+                        "type": "string",
+                        "description": "Hostname or IP address."
+                    }
+                },
+                "required": ["host"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "wifi_scan",
+            "description": "Scan for nearby Wi-Fi networks via NetworkManager.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "public_ip",
+            "description": "Report the public (WAN) IP address. Disabled unless network_public_ip_enabled = true.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "firewall_status",
+            "description": "Read the firewall status, or turn the firewall on/off (needs confirmation and sudo).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "description": "status (default), on, or off."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {
