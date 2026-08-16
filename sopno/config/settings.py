@@ -172,6 +172,26 @@ class Settings:
             data.get("network_public_ip_enabled", False)
         )
 
+        # ── Vision / email / calendar / notes ─────────────────
+        # describe_screenshot feeds an image to a local Ollama vision model.
+        self.vision_enabled: bool = bool(data.get("vision_enabled", False))
+        self.vision_model: str = data.get("vision_model", "")
+        # Email is opt-in; passwords come from env (email_password_env), never
+        # from config.json.
+        self.email_enabled: bool = bool(data.get("email_enabled", False))
+        self.email_imap_server: str = data.get("email_imap_server", "")
+        self.email_imap_port: int = int(data.get("email_imap_port", 993))
+        self.email_smtp_server: str = data.get("email_smtp_server", "")
+        self.email_smtp_port: int = int(data.get("email_smtp_port", 587))
+        self.email_user: str = data.get("email_user", "")
+        self.email_from: str = data.get("email_from", "")
+        self.email_password_env: str = data.get(
+            "email_password_env", "SOPNO_EMAIL_PASSWORD"
+        )
+        # Local file-based calendar (.ics under calendar_dir) and markdown notes.
+        self.calendar_dir: str = data.get("calendar_dir", "sopno/memory/calendar")
+        self.notes_dir: str = data.get("notes_dir", "sopno/memory/notes")
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

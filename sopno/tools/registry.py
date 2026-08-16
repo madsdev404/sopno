@@ -77,6 +77,10 @@ from sopno.tools.builtins.network import (
     public_ip,
     firewall_status,
 )
+from sopno.tools.builtins.vision import describe_screenshot, ocr_image
+from sopno.tools.builtins.email import email_read, email_send
+from sopno.tools.builtins.calendar import calendar_list, calendar_create_event
+from sopno.tools.builtins.notes import note_write, note_list, note_search
 from sopno.llm.researcher import research
 
 
@@ -138,6 +142,15 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "wifi_scan": wifi_scan,
     "public_ip": public_ip,
     "firewall_status": firewall_status,
+    "describe_screenshot": describe_screenshot,
+    "ocr_image": ocr_image,
+    "email_read": email_read,
+    "email_send": email_send,
+    "calendar_list": calendar_list,
+    "calendar_create_event": calendar_create_event,
+    "note_write": note_write,
+    "note_list": note_list,
+    "note_search": note_search,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

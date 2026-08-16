@@ -957,6 +957,182 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "describe_screenshot",
+            "description": "Describe an image with the configured local vision model (opt-in).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the image (inside the read roots)."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "ocr_image",
+            "description": "Extract text from an image with Tesseract.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute path of the image (inside the read roots)."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email_read",
+            "description": "Read the most recent messages in an IMAP mailbox (read-only).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "How many messages to list (1-20, default 10)."
+                    },
+                    "mailbox": {
+                        "type": "string",
+                        "description": "IMAP folder (default INBOX)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "email_send",
+            "description": "Send an email via SMTP. Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "to": {
+                        "type": "string",
+                        "description": "Recipient address."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject."
+                    },
+                    "body": {
+                        "type": "string",
+                        "description": "Email body text."
+                    }
+                },
+                "required": ["to", "subject", "body"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_list",
+            "description": "List upcoming events from the local .ics calendar files.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {
+                        "type": "number",
+                        "description": "How many upcoming events to show (1-20, default 10)."
+                    }
+                },
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_create_event",
+            "description": "Add an event to the local calendar file. Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "summary": {
+                        "type": "string",
+                        "description": "Event title."
+                    },
+                    "start": {
+                        "type": "string",
+                        "description": "Start as 'YYYY-MM-DD HH:MM'."
+                    },
+                    "end": {
+                        "type": "string",
+                        "description": "End as 'YYYY-MM-DD HH:MM'."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional note."
+                    }
+                },
+                "required": ["summary", "start", "end"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "note_write",
+            "description": "Save a note as a markdown file. Requires confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Note title (becomes the file name)."
+                    },
+                    "content": {
+                        "type": "string",
+                        "description": "Note body (markdown ok)."
+                    }
+                },
+                "required": ["title", "content"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "note_list",
+            "description": "List the saved notes with sizes and dates.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "note_search",
+            "description": "Search the notes for a phrase (case-insensitive).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "The text to look for."
+                    }
+                },
+                "required": ["query"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {

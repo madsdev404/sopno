@@ -421,7 +421,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 64 tools:
+ the LLM (OpenAI-style `function` objects). It defines 73 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -477,6 +477,15 @@ This is the most important file in the project. It:
 | `wifi_scan` | Nearby Wi-Fi networks via nmcli | — |
 | `public_ip` | WAN IP via echo service (opt-in) | — |
 | `firewall_status` | ufw status, or on/off (confirmed) | `action` |
+| `describe_screenshot` | Describe an image with the local vision model (opt-in) | `path` |
+| `ocr_image` | Extract text from an image (Tesseract) | `path` |
+| `email_read` | Recent IMAP messages (read-only, opt-in) | `limit`, `mailbox` |
+| `email_send` | Send email via SMTP (confirmed, opt-in) | `to`, `subject`, `body` |
+| `calendar_list` | Upcoming events from local .ics files | `limit` |
+| `calendar_create_event` | Append an event to calendar.ics (confirmed) | `summary`, `start`, `end`, `description` |
+| `note_write` | Save a markdown note (confirmed) | `title`, `content` |
+| `note_list` | List saved notes | — |
+| `note_search` | Keyword-search the notes | `query` |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -683,6 +692,34 @@ domain:
     is **disabled unless `network_public_ip_enabled = true`**.
   - `firewall_status("on"/"off")` is the only mutating path — confirmed and run
     via `sudo -n ufw <action>`. Host arguments are strictly validated.
+- **`vision.py`** — image understanding.
+  - `describe_screenshot(path)` — **opt-in** (`vision_enabled` + `vision_model`,
+    e.g. `qwen2.5vl:7b`); reads the image bytes, base64-encodes them as a
+    `data:` URI, and POSTs to Ollama's `/api/chat`. Gated by the file read
+    roots and an 8 MB cap; friendly "vision is off" message otherwise.
+  - `ocr_image(path)` — pytesseract first, then a `tesseract <file> stdout`
+    subprocess fallback; a clear install hint when neither exists.
+- **`email.py`** — **opt-in only** (`email_enabled`). Passwords never live in
+  config.json — they come from the env var named by `email_password_env`
+  (default `SOPNO_EMAIL_PASSWORD`).
+  - `email_read(limit, mailbox)` — read-only IMAP4_SSL, lists the newest
+    messages as subject / from / plain-text snippet.
+  - `email_send(to, subject, body)` — SMTP + STARTTLS, **confirmed**; recipient
+    is validated against a safe charset, subject must be one line, body capped.
+- **`calendar.py`** — file-based ICS, no external service.
+  - `calendar_list(limit)` — parses `BEGIN:VEVENT` blocks out of every `.ics`
+    under `calendar_dir` (datetime regex `YYYYMMDD[T]HHMMSS[Z]` or date-only)
+    and lists the upcoming ones, sorted by start time.
+  - `calendar_create_event(summary, start, end, description)` — accepts
+    `YYYY-MM-DD HH:MM` input, builds an escaped VEVENT and appends it to
+    `calendar.ics` (write-root gated + confirmed; creates the VCALENDAR
+    wrapper on first use).
+- **`notes.py`** — markdown knowledge base under `notes_dir`
+  (default `sopno/memory/notes`).
+  - `note_write(title, content)` — sanitised title → `<title>.md`; confirmed,
+    with a separate overwrite confirmation.
+  - `note_list()` — names + sizes + mtimes; `note_search(query)` — read-only
+    case-insensitive grep returning matching line snippets.
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -885,6 +922,15 @@ All settings live in **`config.json`** at the repo root and are read by
 | `packages_require_sudo` | `true` | Wrap apt/pacman/dnf in `sudo -n` |
 | `network_enabled` | `true` | Master switch for the network tools |
 | `network_public_ip_enabled` | `false` | Allow `public_ip` to call a WAN echo service |
+| `vision_enabled` | `false` | Enable `describe_screenshot` (needs a vision model) |
+| `vision_model` | `""` | Ollama vision model, e.g. `qwen2.5vl:7b` |
+| `email_enabled` | `false` | Enable the IMAP/SMTP email tools |
+| `email_imap_server` | `""` | IMAP host for reading mail |
+| `email_smtp_server` | `""` | SMTP host for sending mail |
+| `email_user` | `""` | Email account (IMAP + SMTP login) |
+| `email_password_env` | `SOPNO_EMAIL_PASSWORD` | Env var that holds the password (never config.json) |
+| `calendar_dir` | `sopno/memory/calendar` | Folder of `.ics` calendar files |
+| `notes_dir` | `sopno/memory/notes` | Markdown notes folder |
 
 ---
 

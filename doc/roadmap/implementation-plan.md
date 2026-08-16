@@ -358,6 +358,19 @@ store reopen; malformed `when` → friendly error.
 - `ping_host(host)`, `traceroute(host)`, `wifi_scan()` (nmcli), `public_ip()`
   (curl if enabled), `firewall_status(action)` — all read-only by default.
 
+> **✅ IMPLEMENTED (Step 21, Aug 16 2026):** four new skills, 9 tools.
+> `vision.py` — `describe_screenshot` (opt-in `vision_enabled` +
+> `vision_model`; base64 image to Ollama `/api/chat`, ≤8 MB, read-root
+> gated), `ocr_image` (pytesseract with `tesseract` CLI fallback).
+> `email.py` — read-only `email_read` (IMAP) and confirmed `email_send`
+> (SMTP+STARTTLS); opt-in (`email_enabled`), password from the env var named
+> by `email_password_env` (never config.json), input validated.
+> `calendar.py` — dependency-free `.ics` parser under `calendar_dir`
+> (`calendar_list`) and confirmed `calendar_create_event` (appends an escaped
+> VEVENT to `calendar.ics`, write-root gated). `notes.py` — markdown knowledge
+> base under `notes_dir`: `note_write` (confirmed, overwrite confirmed),
+> `note_list`, `note_search`. Suite → 462.
+
 ### 9. Vision / Email / Calendar / Notes / Knowledge Base
 - **Vision:** `describe_screenshot(path)` — feed image to an Ollama vision
   model (`qwen2.5vl` etc., opt-in config); `ocr_image(path)` — Tesseract.

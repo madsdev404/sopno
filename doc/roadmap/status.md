@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Database, Packages & Networking
+* **Latest Completed Upgrade:** Vision, Email, Calendar & Notes
 
 ---
 
@@ -116,9 +116,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Networking (read-only by default):** `ping_host` (`ping -c 4`), `traceroute` (missing-binary note if absent), `wifi_scan` (nmcli), `public_ip` (**opt-in** via `network_public_ip_enabled`), `firewall_status()` (`ufw status verbose`). The only mutating tool is `firewall_status("on"/"off")` — confirmed, `sudo -n`.
 * [x] **Config:** `database_enabled` / `packages_enabled` / `packages_uninstall_allowed` / `packages_require_sudo` / `network_enabled` / `network_public_ip_enabled`.
 
+### 16. Vision, Email, Calendar & Notes — **[COMPLETED]**
+* [x] **Vision:** `describe_screenshot(path)` — feeds a base64 image to a local Ollama vision model (`vision_model`, opt-in via `vision_enabled`; images must be in the read roots, ≤ 8 MB). `ocr_image(path)` — Tesseract via pytesseract with a `tesseract` CLI fallback; friendly message when missing.
+* [x] **Email:** `email_read(limit, mailbox)` — read-only IMAP (subject/from/snippet); `email_send(to, subject, body)` — SMTP+STARTTLS, **confirmed**. Opt-in only (`email_enabled`); passwords come from the env var named by `email_password_env`, never config.json. Recipient/subject/body validated.
+* [x] **Calendar:** `calendar_list(limit)` — parses `.ics` files under `calendar_dir` (no external service) and lists upcoming events; `calendar_create_event(...)` — appends a VEVENT to `calendar.ics` (write-root gated, confirmed, values escaped).
+* [x] **Notes / knowledge base:** `note_write(title, content)` — markdown under `notes_dir` (confirmed, overwrite confirmed); `note_list()` and `note_search(query)` — read-only grep.
+* [x] **Config:** `vision_enabled` / `vision_model` / `email_*` / `calendar_dir` / `notes_dir`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 21: Vision, Email, Calendar & Notes
+* **Added Files:** `sopno/tools/builtins/vision.py`, `sopno/tools/builtins/email.py`, `sopno/tools/builtins/calendar.py`, `sopno/tools/builtins/notes.py`, `tests/test_vision.py`, `tests/test_email.py`, `tests/test_calendar.py`, `tests/test_notes.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/builtins/__init__.py`, `sopno/core/assistant.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Four new skills (9 tools). **vision.py** — `describe_screenshot` posts a base64 image to Ollama's `/api/chat` with the configured `vision_model` (opt-in), and `ocr_image` extracts text via pytesseract with a `tesseract` CLI fallback. **email.py** — read-only IMAP (`email_read`) and confirmed SMTP+STARTTLS `email_send`; the whole feature is opt-in (`email_enabled` false by default), and the password is read from an environment variable (`email_password_env`, default `SOPNO_EMAIL_PASSWORD`) so secrets never touch config.json. **calendar.py** — a dependency-free `.ics` parser under `calendar_dir` (`calendar_list`) plus a confirmed `calendar_create_event` that appends a properly-escaped VEVENT to `calendar.ics`. **notes.py** — markdown knowledge base under `notes_dir` (`note_write` confirmed + overwrite confirmed, `note_list`, `note_search`). 35 new tests → suite at 462.
 
 ### [August 16, 2026] — Step 20: Database, Packages & Networking
 * **Added Files:** `sopno/tools/builtins/databases.py`, `sopno/tools/builtins/packages.py`, `sopno/tools/builtins/network.py`, `tests/test_databases.py`, `tests/test_packages.py`, `tests/test_network.py`

@@ -26,6 +26,10 @@ Files:
   - databases.py     → query_database (read-only SQLite), explain_schema, backup_database
   - packages.py      → install_package (confirmed), uninstall_package (blocked by default)
   - network.py       → ping_host, traceroute, wifi_scan, public_ip (opt-in), firewall_status
+  - vision.py        → describe_screenshot (Ollama vision, opt-in), ocr_image (Tesseract)
+  - email.py         → email_read (IMAP, read-only), email_send (SMTP, confirmed; opt-in config)
+  - calendar.py      → calendar_list, calendar_create_event (file-based .ics, confirmed)
+  - notes.py         → note_write (confirmed), note_list, note_search (markdown knowledge base)
   - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 
