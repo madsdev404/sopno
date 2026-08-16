@@ -137,3 +137,11 @@ sopno/memory/reminders.db-shm
 sopno/memory/rules.db
 sopno/memory/rules.db-wal
 sopno/memory/rules.db-shm
+
+# Long-running agent sessions + job queue (user data — never commit)
+sopno/memory/agents.db
+sopno/memory/agents.db-wal
+sopno/memory/agents.db-shm
+
+# Autonomous-coding worktrees (isolated branches awaiting review — never commit)
+sopno/memory/worktrees/

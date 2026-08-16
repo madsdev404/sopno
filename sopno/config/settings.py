@@ -206,6 +206,53 @@ class Settings:
         self.subagents_enabled: bool = bool(data.get("subagents_enabled", True))
         self.subagents_max_turns: int = int(data.get("subagents_max_turns", 4))
 
+        # ── Long-running agents ──────────────────────────────
+        # Durable agent sessions + job queue (sopno/core/agents). SQLite file
+        # for both sessions and jobs; relative paths resolve to project root.
+        self.agents_enabled: bool = bool(data.get("agents_enabled", True))
+        self.agents_path: Path = Path(data.get("agents_path", "sopno/memory/agents.db"))
+        if not self.agents_path.is_absolute():
+            self.agents_path = _PROJECT_ROOT / self.agents_path
+        # Cap on concurrent sessions / workers; lease + retry tuning for the
+        # queue (lease_seconds = claim heartbeat window, backoff = retry delay).
+        self.agents_max_sessions: int = int(data.get("agents_max_sessions", 20))
+        self.agents_concurrency: int = int(data.get("agents_concurrency", 2))
+        self.agents_lease_seconds: float = float(data.get("agents_lease_seconds", 300))
+        self.agents_backoff_base: float = float(data.get("agents_backoff_base", 5))
+        self.agents_backoff_cap: float = float(data.get("agents_backoff_cap", 3600))
+        self.agents_max_attempts: int = int(data.get("agents_max_attempts", 3))
+
+        # ── Autonomous coding ────────────────────────────────
+        # CodingAgent loop (sopno/core/coding.py). Worktrees live under
+        # coding_worktree_dir (inside the project root so the file gates apply);
+        # every run is an isolated branch the human reviews and merges.
+        self.coding_enabled: bool = bool(data.get("coding_enabled", True))
+        self.coding_worktree_dir: Path = Path(
+            data.get("coding_worktree_dir", "sopno/memory/worktrees")
+        )
+        if not self.coding_worktree_dir.is_absolute():
+            self.coding_worktree_dir = _PROJECT_ROOT / self.coding_worktree_dir
+        # Hard budgets (turns / tokens / wall-clock / diff size) + the
+        # stagnation detector (stall_rounds rounds without progress).
+        self.coding_max_turns: int = int(data.get("coding_max_turns", 150))
+        self.coding_max_tokens: int = int(data.get("coding_max_tokens", 300_000))
+        self.coding_max_wall_minutes: int = int(data.get("coding_max_wall_minutes", 120))
+        self.coding_max_diff_lines: int = int(data.get("coding_max_diff_lines", 800))
+        self.coding_stall_rounds: int = int(data.get("coding_stall_rounds", 6))
+        # "review_required" (default, human merges) | "auto_merge_guardrailed"
+        # | "unattended". Protected paths deny edits (deny-first).
+        self.coding_approval_mode: str = data.get(
+            "coding_approval_mode", "review_required"
+        )
+        self.coding_protected_paths: list = data.get(
+            "coding_protected_paths",
+            ["config.json", "sopno/memory", ".git"],
+        )
+        # Red/green: require a failing test before the fix.
+        self.coding_require_red_test: bool = bool(data.get("coding_require_red_test", True))
+        # git push / remote actions stay off unless explicitly enabled.
+        self.coding_push_enabled: bool = bool(data.get("coding_push_enabled", False))
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

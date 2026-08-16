@@ -314,6 +314,53 @@ tools.
   `subagents_max_turns`): execute tool calls through the registry (unknown
   names are answered safely), feed results back, return the final text.
 - `list_agents()` — the available subagent names.
+
+**`sopno/core/agents/`** — durable machinery for long-running background agents
+(backing store + work queue; design in `doc/roadmap/long-running-agents.md`).
+
+- `session.py` — `AgentSessionStore`, own SQLite DB (`settings.agents_path`,
+  WAL, RLock). `create_session(name, goal, ...)` → durable session with status
+  machine `ready → running → done | failed | cancelled | waiting_human`
+  (`valid_transition` guards every move; illegal transitions raise). Heartbeat
+  updates `last_heartbeat`/`updated_at` (running only). Append-only action log
+  (`log_action`) — the session is a structured event stream, not a chat
+  transcript. Plan/memory alignment budget caps the stored plan+memory size.
+- `queue.py` — `AgentQueue`, own table in the same SQLite DB. `enqueue` with
+  idempotency (a `dedupe_key` collapses repeats); `claim(worker, limit)` claims
+  `ready` jobs atomically (`BEGIN IMMEDIATE`, `ORDER BY id ASC`) and stamps a
+  lease; `finish`/`fail`/`release`; `renew(worker, id)` heartbeat-extends the
+  lease; `recover_orphans()` requeues expired-lease jobs (attempts + 1) or
+  dead-letters them past `agents_max_attempts`; failed jobs retry with
+  exponential backoff + jitter (`_backoff_seconds`); `stats()` counts by status.
+
+**`sopno/core/coding/`** — the autonomous coding harness (design in
+`doc/roadmap/autonomous-coding.md`). Split from the original ~844-line
+`sopno/core/coding.py` into single-purpose modules per the "one folder = one
+job" rule.
+
+- `agent.py` — `CodingAgent.run()`: plan → recite → act → verify loop in a git
+  worktree, bounded by `coding_max_turns`/`coding_max_tokens`/
+  `coding_max_wall_minutes`/`coding_max_diff_lines` + a stall detector. After
+  each change tool it verifies, and commits a checkpoint on green. Terminal
+  states `success | no_op | blocked | stalled | exhausted` (LLM errors land in
+  `exhausted`, never `success`). The harness owns `PLAN.md`/`progress.md`/
+  `SUMMARY.md`; injectables `llm_step`/`git_runner`/`verify_runner` make it
+  fully unit-testable.
+- `tools.py` — `ToolDispatcher`: allowlists `ALLOWED_TOOLS`, filters
+  `get_schema()` for `tools_schema()`, and `_gate`'s every write through
+  `files._authorize` (bypassing the interactive Yes/No, never the gate).
+  Refusals are observations returned to the LLM, not errors.
+- `worktree.py` — `WorktreeSession`: creates/cleans the worktree
+  (`settings.coding_worktree_dir`, branch `sopno/<slug>-<ts>`, safe-name
+  checks), `setup()` captures `base_sha`, `checkpoint()` commits with a
+  guarded identity, `diff_lines()` counts changed lines since base.
+- `verify.py` — `Verifier`: `resolve_recipe` picks the task spec's
+  `verify_recipe`, or a default test command (`python -m unittest discover` via
+  a `.venv`-aware `guess_python`, `--quiet`); `run()`/`green()` report exit
+  code, stderr, and a structured verdict.
+- `prompts.py` — `system_prompt`/`task_prompt`/`recitation` (harness docs as a
+  single message block each turn).
+- `util.py` — `slugify`, `q` (shlex quote), `safe_branch` (branch-safe regex).
   - volume up/down/mute → `control_volume`
   - system stats / CPU / RAM / battery → `get_system_stats`
   - lock screen → `lock_screen`
@@ -933,7 +980,7 @@ python3 -m unittest discover -s tests
 | Subpackage / file | What it verifies |
 |------|------------------|
 | `voice/` | Audio stack: `test_tts.py` (`_is_bangla()` + engine routing), `test_stt.py` (Whisper-first, Google fallback only when enabled), `test_wakeword.py` (fallback + lazy detector), `test_barge.py` (interrupt logic) |
-| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py` |
+| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py`, `test_agents.py` (session + queue), `test_coding.py` (coding harness loop) |
 | `tools/` | One file per skill: `test_browser.py`, `test_calendar.py`, `test_databases.py`, `test_desktop.py`, `test_email.py`, `test_files.py`, `test_git.py`, `test_manage.py`, `test_network.py`, `test_notes.py`, `test_packages.py`, `test_readers.py`, `test_terminal.py`, `test_vision.py` |
 | `integration/` | Cross-cutting: `test_mcp.py` (client/server), `test_plugins.py` (dynamic loader) |
 | `test_tools.py` | Registry-level checks (all registered tools present, tool output formats, subprocess call wiring) |
@@ -1013,6 +1060,25 @@ All settings live in **`config.json`** at the repo root and are read by
 | `rules_poll_seconds` | `60` | How often the `RulePoller` checks conditions |
 | `subagents_enabled` | `true` | Allow `run_subagent` |
 | `subagents_max_turns` | `4` | Cap on tool-calling iterations per subagent |
+| `agents_enabled` | `true` | Master switch for the long-running-agent machinery |
+| `agents_path` | `sopno/memory/agents.db` | SQLite DB for sessions + queue |
+| `agents_max_sessions` | `20` | Cap on stored sessions |
+| `agents_concurrency` | `2` | Max sessions running at once |
+| `agents_lease_seconds` | `300` | Claim lease length (heartbeat renews it) |
+| `agents_backoff_base` | `5` | Base (s) for failed-job exponential backoff |
+| `agents_backoff_cap` | `3600` | Backoff ceiling (s) |
+| `agents_max_attempts` | `3` | Attempts before a job is dead-lettered |
+| `coding_enabled` | `true` | Master switch for autonomous coding |
+| `coding_worktree_dir` | `sopno/memory/worktrees` | Where coding worktrees live |
+| `coding_max_turns` | `150` | Cap on coding-loop turns |
+| `coding_max_tokens` | `300000` | Token budget per run |
+| `coding_max_wall_minutes` | `120` | Wall-clock budget per run |
+| `coding_max_diff_lines` | `800` | Line budget per run (stall + stop) |
+| `coding_stall_rounds` | `6` | No-progress rounds before the run stalls |
+| `coding_approval_mode` | `review_required` | Gate for submitting changes |
+| `coding_protected_paths` | `[config.json, sopno/memory, .git]` | Paths the coding agent may never write |
+| `coding_require_red_test` | `true` | Require a failing test before fixes count |
+| `coding_push_enabled` | `false` | Allow pushing branches (`git_push_enabled` also required) |
 
 ---
 

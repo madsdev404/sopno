@@ -6,7 +6,11 @@ main voice/CLI loop being involved. Sopno already runs as a daemon (systemd
 user service, HUD on login), so this turns that daemon from a passive listener
 into a host for persistent worker agents.
 
-> Status: **research + design only — not yet implemented.**
+> Status: **implemented** — durable agent machinery is live. `AgentSessionStore`
+> (durable sessions, status machine, heartbeat, action log) and `AgentQueue`
+> (atomic claim, leases, backoff, orphan recovery, idempotency, dead-letter) in
+> `sopno/core/agents/`; config under `agents_*`. The scheduler that runs queued
+> sessions in the daemon's background is the remaining wiring.
 > Related: [autonomous-coding.md](./autonomous-coding.md) (the primary task a
 > background agent will run); [features.md](./features.md) §41 lists "long-running
 > background agents" under "Future Features".

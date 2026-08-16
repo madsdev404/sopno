@@ -410,6 +410,32 @@ store reopen; malformed `when` → friendly error.
 
 ---
 
+## Phase D — Long-running agents + autonomous coding
+
+> **✅ IMPLEMENTED (Step 23, Aug 16 2026):** two phases from the new docs
+> (`long-running-agents.md`, `autonomous-coding.md`). **Agent machinery**
+> (`sopno/core/agents/session.py`, `queue.py`) — `AgentSessionStore` durable
+> sessions with the `ready → running → done | failed | cancelled | waiting_human`
+> state machine, heartbeat, and append-only action log; `AgentQueue` on SQLite
+> with `BEGIN IMMEDIATE` atomic claim, expiring leases + heartbeat renewal,
+> exponential backoff with jitter, orphan recovery, idempotency dedupe, and a
+> dead-letter queue. **Coding harness** (`sopno/core/coding/`) — `CodingAgent`
+> plan→recite→act→verify loop inside a git worktree (`sopno/memory/worktrees/`,
+> branch `sopno/<slug>-<ts>`), gated writes via a `ToolDispatcher` that reuses
+> `files._authorize` but never the interactive Yes/No, verification after every
+> change + checkpoint commits, harness-owned `PLAN.md`/`progress.md`/`SUMMARY.md`
+> protected from the agent, terminal states `success | no_op | blocked | stalled
+> | exhausted`, and turn/token/wall-clock/diff-line budgets with stall detection.
+> Per the "one folder = one job" rule the ~844-line `sopno/core/coding.py` was
+> split into the single-purpose `coding/` package (`agent`/`tools`/`worktree`/
+> `verify`/`prompts`/`util`). Config: `agents_*` (enabled/path/max_sessions/
+> concurrency/lease/backoff/max_attempts) + `coding_*` (enabled/worktree_dir/
+> max_turns/max_tokens/max_wall_minutes/max_diff_lines/stall_rounds/
+> approval_mode/protected_paths/require_red_test/push_enabled). 38 tests → 527.
+> **Remaining wiring:** a daemon scheduler that polls the queue and runs sessions
+> in the background, and the `run_coding_task` entry point that bridges a queued
+> session to `CodingAgent`.
+
 ## Dependency & safety summary
 - Every new tool registers in `registry.py` + `schema.py` + `builtins/__init__.py`.
 - Mutating tools (commit/push/copy/overwrite/delete/send/clipboard-set)

@@ -8,6 +8,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * **Current Phase:** Complete — all 10 roadmap features implemented
 * **Latest Completed Upgrade:** Automation Rules, Subagents & GUI Dashboard (Feature #10, final)
 * **Housekeeping:** Builtin tools and tests reorganized into categorized subpackages (`df047e7`)
+* **New Phase:** Long-running agents + autonomous coding — durable agent machinery and the coding loop (see `long-running-agents.md`, `autonomous-coding.md`)
 
 ---
 
@@ -134,6 +135,11 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 23: Long-Running Agents + Autonomous Coding
+* **Added Files:** `sopno/core/agents/session.py`, `sopno/core/agents/queue.py`, `sopno/core/agents/__init__.py`, `sopno/core/coding/` (package: `agent.py`, `tools.py`, `worktree.py`, `verify.py`, `prompts.py`, `util.py`, `__init__.py`), `tests/core/test_agents.py`, `tests/core/test_coding.py`, `doc/roadmap/long-running-agents.md`, `doc/roadmap/autonomous-coding.md`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `.gitignore`, `doc/CODEBASE.md`, `doc/roadmap/implementation-plan.md`, `doc/roadmap/status.md`
+* **Impact:** Two new phases from the roadmap. **Long-running agents** (`sopno/core/agents/`) — a durable session store (`AgentSessionStore`, status machine `ready → running → done | failed | cancelled | waiting_human`, heartbeat, append-only action log, plan/memory alignment budget) plus an `AgentQueue` backed by SQLite (`BEGIN IMMEDIATE` atomic claim, expiring leases with heartbeat renewal, exponential backoff + jitter, orphan recovery, idempotency dedupe, dead-letter after max attempts). **Autonomous coding** (`sopno/core/coding/`) — a self-contained `CodingAgent` that runs a goal loop in a git worktree (`sopno/memory/worktrees/` on branch `sopno/<slug>-<ts>`): plan → recite → act (gated writes through a `ToolDispatcher` that reuses `files._authorize`, never the interactive Yes/No), verify after every change (recipe resolution + checkpoint commits), harness-owned `PLAN.md`/`progress.md`/`SUMMARY.md` protected from the agent, and terminal states `success | no_op | blocked | stalled | exhausted` where "an error is never recorded as a win". Turn/token/wall-clock/diff-line budgets + stall detection bound it. Per the project rule "one folder = one job", the original ~844-line `sopno/core/coding.py` was refactored into the single-purpose `coding/` package (`agent`/`tools`/`worktree`/`verify`/`prompts`/`util`) so `core/` stays tidy. New config: `agents_*` (enabled/path/max_sessions/concurrency/lease/backoff/max_attempts) and `coding_*` (enabled/worktree_dir/max_turns/max_tokens/max_wall_minutes/max_diff_lines/stall_rounds/approval_mode/protected_paths/require_red_test/push_enabled). 38 new tests → suite at 527.
 
 ### [August 16, 2026] — Step 22: Automation Rules, Subagents & GUI Dashboard
 * **Added Files:** `sopno/core/rules.py`, `sopno/core/subagents.py`, `sopno/tools/builtins/rules.py`, `sopno/tools/builtins/subagents.py`, `sopno/ui/hud/dashboard.py`, `tests/test_rules.py`, `tests/test_subagents.py`

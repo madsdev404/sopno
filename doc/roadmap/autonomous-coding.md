@@ -5,7 +5,13 @@ tests, and submits real code changes on its own — instead of answering one too
 call at a time. This is expected to be Sopno's **primary workload**, so the
 harness (the machinery around the LLM) is the deliverable, not the prompt.
 
-> Status: **research + design only — not yet implemented.**
+> Status: **implemented** — the coding harness is live. `CodingAgent` in
+> `sopno/core/coding/` (refactored from one ~844-line module into the
+> single-purpose package `agent`/`tools`/`worktree`/`verify`/`prompts`/`util`)
+> runs a plan→recite→act→verify loop in a git worktree with gated writes,
+> checkpoint commits, harness-owned docs, and terminal states
+> `success | no_op | blocked | stalled | exhausted`. Config under `coding_*`.
+> Scheduler wiring into the daemon and the `run_coding_task` entry point remain.
 > Related: [long-running-agents.md](./long-running-agents.md) (how a coding run
 > survives across sessions); [features.md](./features.md) §41 lists this under
 > "Future Features".
