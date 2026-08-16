@@ -9,6 +9,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from sopno.config.settings import settings
 from sopno.memory.store import MemoryStore
 from sopno.core.context import ConversationContext
 from sopno.core.assistant import parse_memory_intent
@@ -20,15 +21,21 @@ def _temp_db() -> str:
     return path
 
 
-class TestMemoryStore(unittest.TestCase):
-    """Verifies CRUD, FTS5 search, dedup, soft-delete, and stats."""
+class MemoryStoreTestBase(unittest.TestCase):
+    """Base with the semantic (embedding) layer off — pure FTS5 behavior."""
 
     def setUp(self) -> None:
+        self._saved_semantic = settings.semantic_memory_enabled
+        settings.semantic_memory_enabled = False
         self._path = _temp_db()
         self.store = MemoryStore(db_path=self._path)
 
     def tearDown(self) -> None:
         self.store.close()
+        settings.semantic_memory_enabled = self._saved_semantic
+
+
+class TestMemoryStore(MemoryStoreTestBase):
 
     def test_remember_and_recall(self) -> None:
         """remember inserts a row; recall finds it by keyword."""
@@ -194,6 +201,8 @@ class TestMemoryContextInjection(unittest.TestCase):
     """Verifies [Memories] block injection into the LLM prompt."""
 
     def setUp(self) -> None:
+        self._saved_semantic = settings.semantic_memory_enabled
+        settings.semantic_memory_enabled = False
         self._path = _temp_db()
         self.store = MemoryStore(db_path=self._path)
         self.ctx = ConversationContext()
@@ -201,6 +210,7 @@ class TestMemoryContextInjection(unittest.TestCase):
 
     def tearDown(self) -> None:
         self.store.close()
+        settings.semantic_memory_enabled = self._saved_semantic
 
     def test_no_store_means_no_block(self) -> None:
         """Without a store, the prompt is unchanged."""

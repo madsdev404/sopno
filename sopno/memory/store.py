@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from sopno.config.settings import settings
+from sopno.memory import semantic
 
 _SCHEMA_VERSION = "1"
 
@@ -113,6 +114,9 @@ class MemoryStore:
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL")
         self._bootstrap()
+        # Optional semantic layer (sqlite-vec + Ollama embeddings). Best-effort:
+        # when False, recall works exactly as before through FTS5 alone.
+        self._vec_ok = semantic.create_vec_table(self._conn)
 
     # ── Schema / lifecycle ──────────────────────────────────────────────────
 
@@ -175,7 +179,12 @@ class MemoryStore:
                 (content, category, importance),
             )
             self._conn.commit()
-            return int(cur.lastrowid)
+            memory_id = int(cur.lastrowid)
+
+        # Best-effort semantic index (skipped on failure — memory still works).
+        if self._vec_ok:
+            semantic._store_vector(self._conn, memory_id, content)
+        return memory_id
 
     def forget(
         self,
@@ -244,9 +253,15 @@ class MemoryStore:
         """
         Retrieve the most relevant active memories.
 
-        Uses FTS5 keyword matching ranked by bm25, then importance and recency.
-        An empty query returns the most important/recent memories.
-        Recall bumps `use_count` / `last_used_at` (recency signal).
+        Combines FTS5 keyword matching (ranked by bm25, then importance and
+        recency) with semantic vector recall (cosine over Ollama embeddings).
+        Keyword matches stay first; semantic matches fill in when keywords
+        miss, so "what do you remember about the talk I have tomorrow" finds a
+        memory about a "presentation" it never mentions by word.
+
+        An empty query returns the most important/recent memories. Recall bumps
+        ``use_count`` / ``last_used_at`` (recency signal). Degrades gracefully
+        to pure FTS when the semantic layer is unavailable.
         """
         limit = limit or settings.memory_recall_limit
         terms = _fts_terms(query)
@@ -254,6 +269,19 @@ class MemoryStore:
         if not terms:
             return self.all(active_only=True, limit=limit, categories=categories)
 
+        fts_results = self._recall_fts(query, limit, categories)
+        semantic_results = self._recall_semantic(query, limit, categories)
+        results = self._merge_recall(fts_results, semantic_results, limit)
+        self._bump_usage([r["id"] for r in results])
+        return results
+
+    def _recall_fts(
+        self,
+        query: str,
+        limit: int,
+        categories: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        """Keyword (FTS5) recall, as before."""
         with self._lock:
             sql = (
                 "SELECT " + _MEMORY_COLUMNS + ", bm25(memories_fts) AS rank"
@@ -278,9 +306,58 @@ class MemoryStore:
                 # Malformed MATCH for exotic input — degrade to substring scan.
                 return self.all(active_only=True, limit=limit, categories=categories)
 
-            results = [dict(r) for r in rows]
-            self._bump_usage([r["id"] for r in results])
-            return results
+            return [dict(r) for r in rows]
+
+    def _recall_semantic(
+        self,
+        query: str,
+        limit: int,
+        categories: Optional[list[str]] = None,
+    ) -> list[dict[str, Any]]:
+        """Meaning-based (vector) recall. Best-effort — [] on any failure."""
+        if not self._vec_ok:
+            return []
+        k = max(limit, semantic.recall_limit())
+        pairs = semantic.query_embedding(self._conn, query, k)
+        if not pairs:
+            return []
+        ids = [pid for pid, _ in pairs]
+        placeholders = ",".join("?" for _ in ids)
+        sql = (
+            f"SELECT {_MEMORY_COLUMNS} FROM memories m"
+            f" WHERE m.id IN ({placeholders}) AND m.active = 1"
+        )
+        params: list[Any] = ids
+        if categories:
+            ph = ",".join("?" for _ in categories)
+            sql += f" AND m.category IN ({ph})"
+            params.extend(categories)
+        with self._lock:
+            rows = self._conn.execute(sql, params).fetchall()
+        by_id = {r["id"]: dict(r) for r in rows}
+        cosine = dict(pairs)
+        ordered = [by_id[pid] for pid, _ in pairs if pid in by_id]
+        ordered.sort(key=lambda d: (cosine[d["id"]], d["importance"]), reverse=True)
+        return ordered[:limit]
+
+    @staticmethod
+    def _merge_recall(
+        fts_results: list[dict[str, Any]],
+        semantic_results: list[dict[str, Any]],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        """FTS results first, semantic matches fill the remaining slots."""
+        if not semantic_results:
+            return fts_results
+        seen = {r["id"] for r in fts_results}
+        merged = list(fts_results)
+        for r in semantic_results:
+            if r["id"] not in seen:
+                merged.append(r)
+                seen.add(r["id"])
+            if len(merged) >= limit:
+                break
+        return merged
 
     def all(
         self,

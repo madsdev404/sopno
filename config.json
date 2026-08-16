@@ -27,6 +27,8 @@
   "memory_path": "sopno/memory/memory.db",
   "memory_max_tokens": 400,
   "memory_recall_limit": 8,
+  "semantic_memory_enabled": true,
+  "semantic_recall_limit": 4,
   "research_embed_model": "nomic-embed-text",
   "research_max_pages": 6,
   "research_page_chars": 20000,

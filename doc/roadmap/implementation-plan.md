@@ -98,6 +98,14 @@ and `git_add` and `git_branch -D` park a pending action + confirm. Refuse
 **Testing:** temp-DB tests — embed via a mocked model (fixed vectors), assert
 recall returns the nearest row; assert graceful fallback when Ollama missing.
 
+> **✅ IMPLEMENTED (Step 14, Aug 16 2026):** `sopno/memory/semantic.py` +
+> integration in `sopno/memory/store.py` (vec0 table guarded by
+> `semantic_memory_enabled` + sqlite-vec availability, embeddings on
+> `remember()`, KNN on recall with `_MIN_COSINE = 0.4`, keyword matches kept
+> first with semantic matches filling the remaining slots). Zero vectors are
+> never stored (they'd match everything at cosine 0.5). Fallback to FTS5-only
+> verified in `tests/test_semantic.py` (14 tests, mocked embeddings).
+
 ### 3. File Access Round 2
 
 **Research findings**

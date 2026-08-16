@@ -38,11 +38,11 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Core Functions:** Time/date, open apps, volume adjust, media controls, system stats, lock screen.
 * [x] **CLI Sync:** Tool calling works on the terminal interface (`sopno.py`) as well as the GUI.
 
-### 6. Long-Term Memory (SQLite) — **[PARTIALLY COMPLETED]**
+### 6. Long-Term Memory (SQLite) — **[COMPLETED]**
 * [x] **SQLite Memory Store:** Persistent long-term memory in `sopno/memory/store.py` (schema, CRUD, FTS5 search) — survives restarts.
 * [x] **"Remember" Commands:** "remember that X", "forget X", "what do you remember?" in English and Bangla.
 * [x] **Context Injection:** Relevant memories injected into the LLM prompt with a token-budget guard.
-* [ ] **Semantic Recall (future):** `sqlite-vec` embeddings for automatic similarity-based recall.
+* [x] **Semantic Recall:** `sqlite-vec` embeddings (local Ollama `nomic-embed-text`) for automatic meaning-based recall, merged with FTS5 keyword matches and degrading gracefully to keywords alone when the model is unavailable.
 * Design spec: [modules/memory/memory.md](../modules/memory/memory.md)
 
 ### 7. Terminal Access (Persistent Shell) — **[COMPLETED]**
@@ -76,6 +76,11 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 14: Semantic (Vector) Memory
+* **Added Files:** `sopno/memory/semantic.py`, `tests/test_semantic.py`
+* **Modified Files:** `sopno/memory/store.py`, `sopno/config/settings.py`, `config.json`, `tests/test_memory.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno's long-term memory now understands meaning, not just keywords. Each remembered fact also gets an embedding from the same local Ollama `nomic-embed-text` model the researcher uses, stored in a `sqlite-vec` `vec0` table inside `memory.db`. Recall merges FTS5 keyword hits (ranked first) with vector matches (cosine ≥ 0.4) that fill the remaining slots, so "what do you remember about the talk I have tomorrow" finds a memory about a "presentation". The vector layer is best-effort: if the model, the extension, or the dimensions are unavailable it silently falls back to the existing FTS5 path — memory never breaks. New config: `semantic_memory_enabled`, `semantic_recall_limit`. 14 new tests (deterministic fake embeddings) bring the suite to 250.
 
 ### [August 16, 2026] — Step 13: Git Tools
 * **Added Files:** `sopno/tools/builtins/git.py`, `tests/test_git.py`

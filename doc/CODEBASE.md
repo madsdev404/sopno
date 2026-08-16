@@ -136,7 +136,8 @@ sopno/                         ← project root
 │   ├── config/                ← settings loader + prompt text loader
 │   ├── core/                  ← assistant loop, context, dispatcher
 │   ├── voice/                 ← listener, VAD, wake word, STT, TTS
-│   ├── llm/                   ← Ollama client, history summarizer
+│   ├── llm/                   ← Ollama client, researcher, history summarizer
+│   ├── memory/                ← long-term SQLite memory + semantic vectors
 │   ├── tools/                 ← desktop action tools + registry + schema
 │   └── ui/                    ← terminal CLI + PyQt5 glassmorphic HUD
 ├── prompts/                   ← editable prompt templates (*.txt)
@@ -373,6 +374,30 @@ This is the most important file in the project. It:
      (`SUMMARIZE_PROMPT` from `prompts/summarize.txt`),
   3. injects the summary as a `system` message right after the system prompt.
 - If summarization fails, it keeps the full history (safe fallback).
+
+### 6.4b `memory/` — Long-Term Memory
+
+**`sopno/memory/store.py`** — the persistent memory store (`MemoryStore`).
+
+- SQLite (`memory.db`) with an FTS5 index over memory content; `remember`,
+  `forget` (soft-delete), `recall`, `stats`, `wipe`.
+- `remember(content, category, importance)` dedupes on exact content; `recall`
+  bumps `use_count`/`last_used_at` (recency signal).
+- `recall(query, limit, categories)` merges FTS5 keyword matches (bm25, ranked
+  first) with semantic vector matches that fill the remaining slots.
+
+**`sopno/memory/semantic.py`** — the vector layer on top of the store.
+
+- Reuses the researcher's Ollama `nomic-embed-text` embedding
+  (`embed_texts`) and stores one 768-dim vector per memory in a `sqlite-vec`
+  `vec0` table (`memory_vectors`), keyed by the memory rowid.
+- `query_embedding()` runs a KNN `MATCH` over the table and converts L2
+  distance → cosine (`_MIN_COSINE = 0.4`); candidates are re-joined to the
+  `memories` table and filtered by `active`/category.
+- Best-effort throughout: if `semantic_memory_enabled` is off, sqlite-vec is
+  missing, the model is unreachable, or embeddings don't fit 768 dims, the
+  store silently degrades to pure FTS5 recall. Zero vectors are never stored
+  (they'd match everything at cosine 0.5).
 
 ### 6.5 `tools/` — What Sopno Can Do
 

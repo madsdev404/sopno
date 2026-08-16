@@ -99,6 +99,12 @@ class Settings:
         self.memory_max_tokens: int = int(data.get("memory_max_tokens", 400))
         # How many memories are injected / recalled per turn.
         self.memory_recall_limit: int = int(data.get("memory_recall_limit", 8))
+        # Semantic (vector) recall: sqlite-vec vec0 + the Ollama embed model.
+        # When disabled or the model/extension is unavailable, recall falls
+        # back to the FTS5 keyword path — memory always works.
+        self.semantic_memory_enabled: bool = bool(data.get("semantic_memory_enabled", True))
+        # How many semantic (meaning-based) candidates are fetched per recall.
+        self.semantic_recall_limit: int = int(data.get("semantic_recall_limit", 4))
 
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
