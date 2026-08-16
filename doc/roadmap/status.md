@@ -5,8 +5,9 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📊 Status Summary
-* **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** Automation Rules, Subagents & GUI Dashboard
+* **Current Phase:** Complete — all 10 roadmap features implemented
+* **Latest Completed Upgrade:** Automation Rules, Subagents & GUI Dashboard (Feature #10, final)
+* **Housekeeping:** Builtin tools and tests reorganized into categorized subpackages (`df047e7`)
 
 ---
 
