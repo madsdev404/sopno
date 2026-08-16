@@ -22,6 +22,7 @@ Files:
   - readers.py       → binary document readers (PDF / image OCR / Office) used by read_file
   - reminders.py     → set_reminder, list_reminders, cancel_reminder (SQLite + poller in core)
   - browser.py       → browser_navigate/click/type/extract/screenshot/back/close (Playwright, opt-in)
+  - desktop.py       → clipboard_get/set, take_screenshot, list_windows, focus_window, send_keys, press_key, get_disk_stats, get_gpu_stats, get_network_stats
   - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 

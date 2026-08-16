@@ -142,6 +142,18 @@ class Settings:
         self.plugins_enabled: bool = bool(data.get("plugins_enabled", True))
         self.plugins_dir: str = data.get("plugins_dir", "plugins")
 
+        # ── Desktop control + hardware ────────────────────────
+        # Master switch for the desktop tools (clipboard, screenshot, windows,
+        # keyboard, hardware reads). Defaults to true but every dependency is
+        # optional and detected at runtime.
+        self.desktop_enabled: bool = bool(data.get("desktop_enabled", True))
+        # When non-empty, open_application only launches apps in this list.
+        self.desktop_allowed_apps: list[str] = [
+            str(a) for a in data.get("desktop_allowed_apps", [])
+        ]
+        # X11-only tools refuse on Wayland while true (input/window/clipboard).
+        self.desktop_require_x11: bool = bool(data.get("desktop_require_x11", True))
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")

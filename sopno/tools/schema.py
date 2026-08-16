@@ -632,6 +632,155 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
     {
         "type": "function",
         "function": {
+            "name": "clipboard_get",
+            "description": "Read the current clipboard contents.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "clipboard_set",
+            "description": "Put text on the clipboard. Requires the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to copy to the clipboard."
+                    }
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "take_screenshot",
+            "description": "Capture the screen to a PNG file. Overwriting an existing file requires the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "path": {
+                        "type": "string",
+                        "description": "Absolute output path; must be inside the file write roots."
+                    },
+                    "region": {
+                        "type": "string",
+                        "description": "Optional 'X,Y,W,H' rectangle to capture; empty = full screen."
+                    }
+                },
+                "required": ["path"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_windows",
+            "description": "List the open desktop windows, one per line.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "focus_window",
+            "description": "Bring a window whose title matches to the front.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title": {
+                        "type": "string",
+                        "description": "Substring of the window title."
+                    }
+                },
+                "required": ["title"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "send_keys",
+            "description": "Type text into the focused window. Requires the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "The text to type."
+                    }
+                },
+                "required": ["text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "press_key",
+            "description": "Press a key or shortcut combo, e.g. 'Return' or 'ctrl+alt+t'. Requires the user's confirmation.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "combo": {
+                        "type": "string",
+                        "description": "The key or combo to press."
+                    }
+                },
+                "required": ["combo"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_disk_stats",
+            "description": "Report disk partitions/usage plus CPU temperature and fan speed.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_gpu_stats",
+            "description": "Report NVIDIA GPU name, utilisation, VRAM, and temperature.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_network_stats",
+            "description": "Report bytes sent and received per network interface.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {

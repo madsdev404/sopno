@@ -52,6 +52,18 @@ from sopno.tools.builtins.browser import (
     browser_back,
     browser_close,
 )
+from sopno.tools.builtins.desktop import (
+    clipboard_get,
+    clipboard_set,
+    take_screenshot,
+    list_windows,
+    focus_window,
+    send_keys,
+    press_key,
+    get_disk_stats,
+    get_gpu_stats,
+    get_network_stats,
+)
 from sopno.llm.researcher import research
 
 
@@ -93,6 +105,16 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "browser_screenshot": browser_screenshot,
     "browser_back": browser_back,
     "browser_close": browser_close,
+    "clipboard_get": clipboard_get,
+    "clipboard_set": clipboard_set,
+    "take_screenshot": take_screenshot,
+    "list_windows": list_windows,
+    "focus_window": focus_window,
+    "send_keys": send_keys,
+    "press_key": press_key,
+    "get_disk_stats": get_disk_stats,
+    "get_gpu_stats": get_gpu_stats,
+    "get_network_stats": get_network_stats,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

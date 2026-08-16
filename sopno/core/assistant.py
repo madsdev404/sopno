@@ -51,6 +51,8 @@ _TOOLISH = re.compile(
     r"copy|duplicate|move|find|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
     r"remind|reminder|reminders|timer|alert|schedule|remind me|"
     r"browse|browser|open (a )?website|go to website|navigate|website|webpage|"
+    r"clipboard|copy that|screenshot|screen shot|windows?|focus|type |typing|"
+    r"keyboard|press |keys?|disk|storage|gpu|graphics|network stats|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",

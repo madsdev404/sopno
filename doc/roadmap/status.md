@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** MCP Support + Plugin System
+* **Latest Completed Upgrade:** Desktop Control + Hardware
 
 ---
 
@@ -99,9 +99,24 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Self-Tested Both Directions:** an in-process MCP server subprocess is driven end-to-end by the client, and Sopno's own client drives its own server (`sopno_get_current_time` worked over the wire).
 * [x] **Config:** `mcp_enabled` / `mcp_servers` / `plugins_enabled` / `plugins_dir`.
 
+### 14. Desktop Control + Hardware — **[COMPLETED]**
+* [x] **Clipboard:** `clipboard_get` / `clipboard_set` via `xclip`/`xsel`; setting text is confirmed.
+* [x] **Screenshot:** `take_screenshot(path, region)` via `scrot`/`maim`; writes only inside the file write-roots (overwrite confirmed), `X,Y,W,H` region support.
+* [x] **Windows:** `list_windows` / `focus_window(title)` via `wmctrl`.
+* [x] **Keyboard:** `send_keys(text)` / `press_key(combo)` via `xdotool`; both confirmed, and key combos with shell metacharacters are rejected outright.
+* [x] **Hardware reads (read-only, no X needed):** `get_disk_stats` (partitions + temps + fans), `get_gpu_stats` (pynvml — graceful "no NVIDIA GPU" note), `get_network_stats` (per-interface RX/TX).
+* [x] **Extended `get_system_stats`** to include disk and CPU temperature when psutil can read them.
+* [x] **X11-first + honest degradation:** every dependency is optional and detected at runtime (friendly "install X" messages); with `desktop_require_x11` true, input/window/clipboard tools refuse on Wayland instead of silently misbehaving. `open_application` honours `desktop_allowed_apps`.
+* [x] **Config:** `desktop_enabled` / `desktop_allowed_apps` / `desktop_require_x11`.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 19: Desktop Control + Hardware
+* **Added Files:** `sopno/tools/builtins/desktop.py`, `tests/test_desktop.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/builtins/system.py`, `sopno/tools/builtins/__init__.py`, `sopno/core/assistant.py`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** New `desktop.py` skill adds 10 tools: clipboard get/set (`xclip`/`xsel`), `take_screenshot` (`scrot`/`maim`, write-root gated + overwrite confirmed, `X,Y,W,H` regions), `list_windows`/`focus_window` (`wmctrl`), `send_keys`/`press_key` (`xdotool`, both confirmed; unsafe combos rejected), and three read-only hardware reads — `get_disk_stats`, `get_gpu_stats` (pynvml, graceful no-GPU note), `get_network_stats`. `get_system_stats` now also reports disk and CPU temperature. Design is X11-first with honest degradation: all dependencies optional (runtime `which` detection → friendly install messages), and with `desktop_require_x11` true the input/window/clipboard tools refuse on Wayland rather than silently misbehaving. `open_application` gained the `desktop_allowed_apps` allowlist. 35 new tests (fake `_run`/`_have`, confirm-gate flows, Wayland gate, fake pynvml module) → suite at 389.
 
 ### [August 16, 2026] — Step 18: MCP Support + Plugin System
 * **Added Files:** `sopno/tools/plugins.py`, `sopno/tools/mcp_client.py`, `sopno/tools/mcp_server.py`, `tests/test_plugins.py`, `tests/test_mcp.py`

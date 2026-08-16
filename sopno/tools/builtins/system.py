@@ -15,6 +15,8 @@ All functions return a short human-readable string suitable for speaking aloud.
 import subprocess
 import psutil
 
+from sopno.config.settings import settings
+
 
 # ── App launcher ───────────────────────────────────────────────────────────────
 
@@ -45,6 +47,13 @@ def open_application(app_name: str) -> str:
     if not cmd:
         supported = ", ".join(_APP_MAP.keys())
         return f"I don't know how to open {app_name}. Supported apps: {supported}."
+    allowed = getattr(settings, "desktop_allowed_apps", None)
+    if allowed:
+        if app_name.lower().strip() not in {a.lower().strip() for a in allowed}:
+            return (
+                f"I'm not allowed to open {app_name}. Allowed apps: "
+                f"{', '.join(sorted(allowed))}."
+            )
     try:
         subprocess.Popen([cmd])
         return f"Opening {app_name}."
@@ -99,6 +108,24 @@ def get_system_stats() -> str:
         if battery:
             status = "charging" if battery.power_plugged else "on battery"
             parts.append(f"Battery is at {battery.percent:.0f} percent and {status}.")
+
+        try:
+            usage = psutil.disk_usage("/")
+            parts.append(
+                f"Disk is at {usage.percent:.0f} percent "
+                f"({usage.used // (1024**3)} of {usage.total // (1024**3)} gigabytes)."
+            )
+        except Exception:  # noqa: BLE001
+            pass
+
+        try:
+            temps = psutil.sensors_temperatures()
+            for entries in temps.values():
+                if entries:
+                    parts.append(f"Temperature is {entries[0].current:.0f} degrees Celsius.")
+                    break
+        except Exception:  # noqa: BLE001
+            pass
 
         return " ".join(parts)
     except Exception as e:

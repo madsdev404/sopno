@@ -421,7 +421,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 44 tools:
+ the LLM (OpenAI-style `function` objects). It defines 54 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -457,6 +457,16 @@ This is the most important file in the project. It:
 | `browser_screenshot` | Save a PNG screenshot (write-root + confirm) | `path`, `full_page` |
 | `browser_back` | Go back to the previous page | — |
 | `browser_close` | Close the browser session | — |
+| `clipboard_get` | Read the clipboard (xclip/xsel) | — |
+| `clipboard_set` | Put text on the clipboard (confirmed) | `text` |
+| `take_screenshot` | Screen capture to PNG (write-root + confirm) | `path`, `region` |
+| `list_windows` | List open desktop windows (wmctrl) | — |
+| `focus_window` | Bring a matching window to the front | `title` |
+| `send_keys` | Type text into the focused window (confirmed) | `text` |
+| `press_key` | Press a key/combo (confirmed; unsafe combos rejected) | `combo` |
+| `get_disk_stats` | Partitions/usage + temps + fans (psutil) | — |
+| `get_gpu_stats` | NVIDIA GPU name/util/VRAM/temp (pynvml) | — |
+| `get_network_stats` | Per-interface bytes up/down (psutil) | — |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -616,6 +626,25 @@ domain:
     per-step `browser_timeout` (30s) and whole-session `browser_task_limit`
     (120s) ceiling; page content is treated as untrusted (no prompt-injection
     into actions).
+- **`desktop.py`** — desktop control + hardware reads, **X11-first** with honest
+  degradation: every dependency is optional and detected at runtime via
+  `shutil.which` (missing binaries → friendly "install X" messages instead of
+  crashes). Input/window/clipboard tools check `_gate(x11=True)`, which refuses
+  on Wayland while `desktop_require_x11` is true.
+  - `clipboard_get()` / `clipboard_set(text)` — `xclip`/`xsel`; setting is a
+    pending-action confirmation.
+  - `take_screenshot(path, region)` — `scrot` (or `maim`), `X,Y,W,H` regions
+    (`scrot -a` / `maim -g`); writes only inside the file write roots
+    (`files._authorize`) and overwrites are confirmed.
+  - `list_windows()` / `focus_window(title)` — `wmctrl -l` / `wmctrl -a`.
+  - `send_keys(text)` / `press_key(combo)` — `xdotool`; both confirmed, and
+    combos containing shell metacharacters (`;|&&`$`) are rejected outright.
+  - `get_disk_stats()` — psutil partitions/usage + `sensors_temperatures` +
+    `sensors_fans` (snap/loop mounts filtered); `get_network_stats()` — per-NIC
+    RX/TX; `get_gpu_stats()` — pynvml (`import pynvml` inside the call, so no
+    hard dependency), reports name/util/VRAM/temp or "No NVIDIA GPU detected".
+  - `open_application` (in `system.py`) honours `desktop_allowed_apps` when the
+    list is non-empty, and `get_system_stats` now appends disk + CPU temperature.
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -809,6 +838,9 @@ All settings live in **`config.json`** at the repo root and are read by
 | `terminal_max_timeout` | `300` | Hard cap on a single `run_terminal` wait |
 | `terminal_output_chars` | `4000` | Output chars shown to the LLM per call (tail kept) |
 | `terminal_blocklist` | *(destructive patterns)* | Lowercase substrings that are blocked from execution |
+| `desktop_enabled` | `true` | Master switch for the desktop tools (clipboard/windows/keys/screenshot/hardware) |
+| `desktop_allowed_apps` | `[]` | When non-empty, `open_application` only launches apps in this list |
+| `desktop_require_x11` | `true` | When true, input/window/clipboard tools refuse on Wayland |
 
 ---
 

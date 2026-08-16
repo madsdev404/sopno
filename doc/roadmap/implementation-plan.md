@@ -285,6 +285,19 @@ store reopen; malformed `when` → friendly error.
 > exposes the full registry to any host. Both directions tested over real stdio
 > (client↔server, and Sopno client driving Sopno server). Suite → 354.
 
+> **✅ IMPLEMENTED (Step 19, Aug 16 2026):** `sopno/tools/builtins/desktop.py`
+> + `tests/test_desktop.py` (35 tests). New tools: `clipboard_get`/`clipboard_set`
+> (xclip/xsel, set confirmed), `take_screenshot(path, region)` (scrot/maim,
+> write-root gated + overwrite confirmed), `list_windows`/`focus_window`
+> (wmctrl), `send_keys`/`press_key` (xdotool, confirmed, unsafe combos
+> rejected), `get_disk_stats` (psutil partitions/temps/fans, snap+loop
+> filtered), `get_gpu_stats` (pynvml, graceful no-GPU note), `get_network_stats`
+> (psutil per-interface). `get_system_stats` extended with disk + CPU temp.
+> `open_application` honours `desktop_allowed_apps`. X11-first with honest
+> degradation: every dep optional (runtime detection → friendly messages);
+> `desktop_require_x11` refuses input/window/clipboard on Wayland. Config:
+> `desktop_enabled` / `desktop_allowed_apps` / `desktop_require_x11`. Suite → 389.
+
 ### 7. Desktop Control + Hardware
 
 **Research findings**
