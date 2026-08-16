@@ -183,6 +183,16 @@ recall returns the nearest row; assert graceful fallback when Ollama missing.
 **Testing:** set/due/deliver/cancel with a fake clock; persistence across a
 store reopen; malformed `when` → friendly error.
 
+> **✅ IMPLEMENTED (Step 16, Aug 16 2026):** `sopno/core/reminders.py` +
+> `sopno/tools/builtins/reminders.py` + `tests/test_reminders.py` (30 tests).
+> `ReminderStore` (own SQLite DB, WAL, `pending → delivered | cancelled`),
+> `parse_when` (deterministic regex → absolute epoch; past wall-clock times roll
+> to tomorrow), `ReminderPoller` daemon thread started in `SopnoAssistant.run()`
+> delivering "Reminder: {text}" through `_deliver_reminder` (speech-lock
+> guarded). Config: `reminders_enabled`, `reminders_poll_seconds`,
+> `reminders_max` (50), `reminders_max_horizon_days` (365), `reminders_path`.
+> Suite → 321.
+
 ---
 
 ## Phase B

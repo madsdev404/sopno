@@ -6,7 +6,7 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 
 ## 📊 Status Summary
 * **Current Phase:** Upgrading Core Foundations
-* **Latest Completed Upgrade:** File & Folder Access (Permission-Gated)
+* **Latest Completed Upgrade:** Scheduler & Reminders
 
 ---
 
@@ -76,9 +76,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [x] **Mutating Tools (Confirmed):** `git_add` (stage files), `git_commit` (optional `add_all`), `git_stash` push/pop — all park a pending action and ask the user Yes/No.
 * [x] **Safe by Construction:** every command runs through the persistent terminal session (`git -C <repo> -c color.ui=false …`), so the terminal blocklist applies; interpolated values are shlex-quoted and checked against shell metacharacters; repo/branch/path names are validated; `git_enabled` master switch in `config.json`.
 
+### 11. Scheduler & Reminders — **[COMPLETED]**
+* [x] **Natural-Language Times:** `parse_when` understands "now", "in 10 minutes", "2h", "9:30pm" (rolls to tomorrow if already past), "today/tonight/tomorrow at 9am", "tomorrow", and `YYYY-MM-DD[ at] HH:MM` — deterministic, with friendly errors.
+* [x] **Tools:** `set_reminder(when, text)` (non-destructive — no confirmation), `list_reminders()`, `cancel_reminder(id)`.
+* [x] **Persistent Store:** own SQLite DB (`sopno/memory/reminders.db`, WAL, gitignored) with `pending → delivered | cancelled`; survives restarts.
+* [x] **Background Poller:** daemon thread in `SopnoAssistant.run()` delivers due reminders into the reply flow every `reminders_poll_seconds` (30s); delivery is atomic (at-least-once, fires exactly once) and serialized with speech via a lock so a reminder never cuts off a reply.
+* [x] **Safety Caps:** `reminders_max` pending (50), `reminders_max_horizon_days` (365); `reminders_enabled` master switch.
+
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 16, 2026] — Step 16: Scheduler & Reminders
+* **Added Files:** `sopno/core/reminders.py`, `sopno/tools/builtins/reminders.py`, `tests/test_reminders.py`
+* **Modified Files:** `sopno/config/settings.py`, `config.json`, `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/tools/builtins/__init__.py`, `sopno/core/assistant.py`, `tests/test_tools.py`, `.gitignore`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now plan ahead. "Remind me in 10 minutes to drink water" — `parse_when` turns the natural-language time into an absolute timestamp (rolled to tomorrow when a wall-clock time has already passed), `set_reminder` stores it in its own SQLite DB (`reminders.db`, WAL, gitignored) with no confirmation needed (non-destructive), and a daemon `ReminderPoller` thread inside `SopnoAssistant.run()` delivers anything due into the reply flow every `reminders_poll_seconds`. Delivery is atomic — each reminder fires exactly once (marked `delivered` in the same transaction), and the speech lock guarantees a fired reminder never overlaps a spoken reply. `list_reminders`/`cancel_reminder` manage pending items; caps (`reminders_max` = 50 pending, `reminders_max_horizon_days` = 365) and the `reminders_enabled` master switch keep it bounded. 3 new tools (37 total), 30 new tests → suite at 321.
 
 ### [August 16, 2026] — Step 15: File Access Round 2 (Search, Copy, Binary Readers)
 * **Added Files:** `sopno/tools/builtins/readers.py`, `tests/test_readers.py`

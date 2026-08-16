@@ -260,6 +260,25 @@ This is the most important file in the project. It:
   - time/date → `get_current_time`
   - "open X" / "launch X" → `open_application`
   - "search X" / "google X" → `search_web`
+
+**`sopno/core/reminders.py`** — one-shot reminders (backing store for the
+`reminders.py` tools).
+
+- `ReminderStore` — own SQLite DB (`settings.reminders_path`, WAL, RLock),
+  rows `reminders(id, due_at, text, status, created_at)` with ISO timestamps and
+  statuses `pending → delivered | cancelled`. `set`/`cancel`/`list`/`due`
+  (delivers due reminders atomically — marked `delivered` in the same
+  transaction, so each fires exactly once)/`count_pending`/`close`.
+- `parse_when(when, now=None)` — deterministic regex parser returning
+  `(due_ts, error)`: "now", "in N units", bare "N units", "today/tonight/tomorrow
+  at? HH[:MM] am/pm", time-only (rolls to tomorrow if already past), "tomorrow"
+  alone (9am), `YYYY-MM-DD[ at] HH:MM` / `YYYY-MM-DD` (9am).
+- `format_due(ts)` — human-friendly "Sunday, August 16 at 02:52 PM".
+- `get_store()` / `set_store(store)` — shared singleton the tools + poller use.
+- `ReminderPoller` — daemon thread; every `reminders_poll_seconds` it delivers
+  due reminders through a `deliver(text)` callback (the assistant's
+  `_deliver_reminder`, guarded by a speech lock). Started in `SopnoAssistant.run`
+  when `reminders_enabled`.
   - volume up/down/mute → `control_volume`
   - system stats / CPU / RAM / battery → `get_system_stats`
   - lock screen → `lock_screen`
@@ -402,7 +421,7 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
- the LLM (OpenAI-style `function` objects). It defines 34 tools:
+ the LLM (OpenAI-style `function` objects). It defines 37 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
@@ -428,6 +447,9 @@ This is the most important file in the project. It:
 | `copy_file` | Duplicate a file or folder (confirmed) | `path`, `new_path`, `overwrite` |
 | `move_file` | Move/rename a file; alias of rename_file | `path`, `new_path` |
 | `search_files` | Find files by name or content | `query`, `path`, `mode` |
+| `set_reminder` | Set a one-shot reminder (non-destructive) | `when`, `text` |
+| `list_reminders` | List upcoming + recent reminders | — |
+| `cancel_reminder` | Cancel a pending reminder by id | `id` |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -519,6 +541,17 @@ domain:
     (20) / `readers_max_chars` (20000); OCR gated by `file_ocr_enabled`.
   - `is_binary_like(path)` — document suffix or null-byte sniff, used by
     `read_file` routing and `search_files` skipping.
+- **`reminders.py`** — one-shot reminders (SQLite + background poller).
+  - `set_reminder(when, text)` — `parse_when` turns natural language ("in 10
+    minutes", "9:30pm", "tomorrow 9am", "2026-08-20 14:30") into a due time;
+    non-destructive (no confirmation). Caps: `reminders_max` pending (50),
+    `reminders_max_horizon_days` (365).
+  - `list_reminders()` — upcoming pending + recent finished reminders.
+  - `cancel_reminder(id)` — cancels a pending reminder by id.
+  - Backing store: `sopno/core/reminders.py` — `ReminderStore` (own SQLite DB,
+    WAL, `pending → delivered | cancelled`), `parse_when`/`format_due`, and
+    `ReminderPoller` (daemon thread, every `reminders_poll_seconds`, atomic
+    at-least-once delivery into the reply flow; enabled by `reminders_enabled`).
 - **`git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.

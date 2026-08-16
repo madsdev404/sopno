@@ -20,6 +20,7 @@ Files:
   - manage.py        → list_processes, kill_process, manage_service, read_logs, manage_cron
   - files.py         → read_file, write_file, edit_file, list_directory, delete_file, rename_file, copy_file, move_file, search_files
   - readers.py       → binary document readers (PDF / image OCR / Office) used by read_file
+  - reminders.py     → set_reminder, list_reminders, cancel_reminder (SQLite + poller in core)
   - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
 """
 

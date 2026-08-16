@@ -20,6 +20,7 @@ import speech_recognition as sr
 from sopno.config.settings import settings
 from sopno.core.context import ConversationContext
 from sopno.core.dispatcher import CommandDispatcher
+from sopno.core.reminders import ReminderPoller, ReminderStore, set_store as set_reminder_store
 from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import TOOLS_SCHEMA
@@ -48,6 +49,7 @@ _TOOLISH = re.compile(
     r"service|cron|log|journal|systemctl|ps aux|list processes|"
     r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes?|"
     r"copy|duplicate|move|find|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
+    r"remind|reminder|reminders|timer|alert|schedule|remind me|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
     r")\b",
@@ -210,6 +212,13 @@ class SopnoAssistant:
         self.memory_store = MemoryStore()
         self.context.memory_store = self.memory_store
 
+        # Persistent reminders — one shared store (tools + background poller).
+        self.reminder_store = ReminderStore()
+        set_reminder_store(self.reminder_store)
+        self._reminder_poller: Optional[ReminderPoller] = None
+        # Serializes speech so a fired reminder never overlaps a spoken reply.
+        self._speech_lock = threading.Lock()
+
         # Listening mode: "wake_word" gates on wake word; "always_on" uses continuous VAD
         self.listening_mode = getattr(settings, "listening_mode", "wake_word")
         self._wake_detector: Optional[WakeWordDetector] = None
@@ -224,6 +233,7 @@ class SopnoAssistant:
         """Stop the assistant loop."""
         self.running = False
         close_terminal_shell()
+        self.reminder_store.close()
         self._text_event.set()
 
     def set_interaction_mode(self, mode: str) -> None:
@@ -296,17 +306,34 @@ class SopnoAssistant:
     def _deliver_reply(self, text: str, *, status: str = "speaking") -> None:
         """Show reply in UI; speak aloud only in voice mode."""
         self.on_reply_generated(text)
-        if self.interaction_mode == "voice":
-            self.on_status_changed(status)
-            if self._speak_with_barge_in(text):
-                self.on_log_message("Barge-in detected — stopped speaking.")
+        with self._speech_lock:
+            if self.interaction_mode == "voice":
+                self.on_status_changed(status)
+                if self._speak_with_barge_in(text):
+                    self.on_log_message("Barge-in detected — stopped speaking.")
+                    self.on_status_changed("listening")
+                    return
+                time.sleep(_POST_SPEAK_SETTLE_S)
+            else:
+                # Text mode: brief "speaking" flash for avatar, no TTS
+                self.on_status_changed(status)
+                time.sleep(0.35)
+
+    def _deliver_reminder(self, text: str) -> None:
+        """Deliver a fired reminder from the background poller thread."""
+        if not self.running:
+            return
+        with self._speech_lock:
+            self.on_reply_generated(text)
+            if self.interaction_mode == "voice":
+                self.on_status_changed("speaking")
+                self._speak_with_barge_in(text)
                 self.on_status_changed("listening")
-                return
-            time.sleep(_POST_SPEAK_SETTLE_S)
-        else:
-            # Text mode: brief "speaking" flash for avatar, no TTS
-            self.on_status_changed(status)
-            time.sleep(0.35)
+            else:
+                self.on_status_changed("speaking")
+                time.sleep(0.35)
+                self.on_status_changed("standby")
+        self.on_log_message(f"[Reminder] Delivered: {text}")
 
     def _await_command(self) -> Optional[str]:
         """
@@ -632,6 +659,17 @@ class SopnoAssistant:
 
         self.on_log_message(f"Using LLM Model: {settings.model_name}")
         self.on_log_message(f"Listening mode: {self.listening_mode}")
+
+        # Background reminder poller — fires due reminders into the reply flow.
+        if getattr(settings, "reminders_enabled", True):
+            self._reminder_poller = ReminderPoller(
+                deliver=self._deliver_reminder,
+                run_check=lambda: self.running,
+            )
+            self._reminder_poller.start()
+            self.on_log_message(
+                f"Reminders enabled (poll every {settings.reminders_poll_seconds}s)."
+            )
 
         while self.running:
             try:

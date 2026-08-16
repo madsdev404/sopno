@@ -454,6 +454,56 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "set_reminder",
+            "description": "Set a one-shot reminder. Parse the user's request into 'when' (natural language like 'in 10 minutes', '9:30pm', 'tomorrow 9am', '2026-08-20 14:30') and 'text' (what to remind about). Non-destructive — no confirmation needed.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "when": {
+                        "type": "string",
+                        "description": "Natural-language time for the reminder."
+                    },
+                    "text": {
+                        "type": "string",
+                        "description": "What to remind the user about."
+                    }
+                },
+                "required": ["when", "text"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "list_reminders",
+            "description": "List upcoming and recent reminders with their ids, due times, and statuses.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "cancel_reminder",
+            "description": "Cancel a pending reminder by its id (shown by list_reminders).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "id": {
+                        "type": "string",
+                        "description": "The reminder id to cancel."
+                    }
+                },
+                "required": ["id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "git_status",
             "description": "Show the working-tree status (branch, staged/unstaged/untracked files) and the last 10 commits of a git repository.",
             "parameters": {

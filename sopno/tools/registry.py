@@ -42,6 +42,7 @@ from sopno.tools.builtins.git import (
     git_stash,
     git_commit_message,
 )
+from sopno.tools.builtins.reminders import set_reminder, list_reminders, cancel_reminder
 from sopno.llm.researcher import research
 
 
@@ -73,6 +74,9 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "copy_file": copy_file,
     "move_file": move_file,
     "search_files": search_files,
+    "set_reminder": set_reminder,
+    "list_reminders": list_reminders,
+    "cancel_reminder": cancel_reminder,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

@@ -106,6 +106,19 @@ class Settings:
         # How many semantic (meaning-based) candidates are fetched per recall.
         self.semantic_recall_limit: int = int(data.get("semantic_recall_limit", 4))
 
+        # ── Reminders ──────────────────────────────────────────
+        # SQLite file for reminders (survives restarts). Relative → project root.
+        self.reminders_path: Path = Path(data.get("reminders_path", "sopno/memory/reminders.db"))
+        if not self.reminders_path.is_absolute():
+            self.reminders_path = _PROJECT_ROOT / self.reminders_path
+        # Master switch for the reminder poller + tools.
+        self.reminders_enabled: bool = bool(data.get("reminders_enabled", True))
+        # How often the background poller checks for due reminders.
+        self.reminders_poll_seconds: float = float(data.get("reminders_poll_seconds", 30))
+        # Max pending reminders; max how far into the future one may be set.
+        self.reminders_max: int = int(data.get("reminders_max", 50))
+        self.reminders_max_horizon_days: int = int(data.get("reminders_max_horizon_days", 365))
+
         # ── Research (RAG) ────────────────────────────────────
         # Local Ollama embedding model — free, offline, 768-dim, best for CPU.
         self.research_embed_model: str = data.get("research_embed_model", "nomic-embed-text")
