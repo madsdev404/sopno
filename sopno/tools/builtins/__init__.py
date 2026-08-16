@@ -3,34 +3,41 @@ sopno/tools/builtins
 ━━━━━━━━━━━━━━━━━━━━
 The skills — what Sopno can DO.
 
-Each file here is one skill (or one small domain) and lives next to its
-machinery: a plain function that returns a short spoken answer.
+Skills are grouped into category packages (mirroring the HUD's subpackage
+layout). Each category re-exports its modules' full namespaces, and this
+package aliases every module at the old flat path so all imports keep working:
+
+    from sopno.tools.builtins import files                 # the category pkg
+    from sopno.tools.builtins.files import read_file       # still works
+    from sopno.tools.builtins.system import open_application
+
+Categories:
+  - system/      system, desktop, manage, media, datetime_tool
+  - files/       files, readers
+  - dev/         terminal, git
+  - web/         browser, search, network
+  - data/        databases, packages
+  - knowledge/   vision, email, calendar, notes
+  - automation/  reminders, rules, subagents
 
 To add a new skill:
-  1. create ``<name>.py`` here with your function,
-  2. register it in ``sopno/tools/registry.py``,
-  3. declare its schema in ``sopno/tools/schema.py``.
-
-Files:
-  - datetime_tool.py → get_current_time
-  - search.py        → search_web
-  - system.py        → open_application, control_volume, get_system_stats, lock_screen
-  - media.py         → play_media_control
-  - terminal.py      → run_terminal, terminal_send, terminal_status
-  - manage.py        → list_processes, kill_process, manage_service, read_logs, manage_cron
-  - files.py         → read_file, write_file, edit_file, list_directory, delete_file, rename_file, copy_file, move_file, search_files
-  - readers.py       → binary document readers (PDF / image OCR / Office) used by read_file
-  - reminders.py     → set_reminder, list_reminders, cancel_reminder (SQLite + poller in core)
-  - browser.py       → browser_navigate/click/type/extract/screenshot/back/close (Playwright, opt-in)
-  - desktop.py       → clipboard_get/set, take_screenshot, list_windows, focus_window, send_keys, press_key, get_disk_stats, get_gpu_stats, get_network_stats
-  - databases.py     → query_database (read-only SQLite), explain_schema, backup_database
-  - packages.py      → install_package (confirmed), uninstall_package (blocked by default)
-  - network.py       → ping_host, traceroute, wifi_scan, public_ip (opt-in), firewall_status
-  - vision.py        → describe_screenshot (Ollama vision, opt-in), ocr_image (Tesseract)
-  - email.py         → email_read (IMAP, read-only), email_send (SMTP, confirmed; opt-in config)
-  - calendar.py      → calendar_list, calendar_create_event (file-based .ics, confirmed)
-  - notes.py         → note_write (confirmed), note_list, note_search (markdown knowledge base)
-  - git.py           → git_status, git_log, git_diff, git_branch, git_add, git_commit, git_stash, git_commit_message
+  1. create ``<name>.py`` in the matching category package,
+  2. alias it in the category ``__init__.py`` and (if you want the old path)
+     in this file,
+  3. register it in ``sopno/tools/registry.py``,
+  4. declare its schema in ``sopno/tools/schema.py``.
 """
+
+from . import system, files, dev, web, data, knowledge, automation  # noqa: F401
+
+# Flat-path aliases — keep the historical ``from sopno.tools.builtins.X import …``
+# working for every module, wherever it now lives.
+from .system import system, desktop, manage, media, datetime_tool  # noqa: F401
+from .files import files, readers  # noqa: F401
+from .dev import terminal, git  # noqa: F401
+from .web import browser, search, network  # noqa: F401
+from .data import databases, packages  # noqa: F401
+from .knowledge import vision, email, calendar, notes  # noqa: F401
+from .automation import reminders, rules, subagents  # noqa: F401
 
 __all__: list[str] = []

@@ -9,19 +9,24 @@ implementations, providing a clean execution interface.
 
 from typing import Callable, Any
 
-from sopno.tools.builtins.system import open_application, control_volume, get_system_stats, lock_screen
-from sopno.tools.builtins.search import search_web, fetch_url
-from sopno.tools.builtins.datetime_tool import get_current_time
-from sopno.tools.builtins.media import play_media_control
-from sopno.tools.builtins.terminal import run_terminal, terminal_send, terminal_status
-from sopno.tools.builtins.manage import (
+from sopno.tools.builtins.system.system import (
+    open_application,
+    control_volume,
+    get_system_stats,
+    lock_screen,
+)
+from sopno.tools.builtins.web.search import search_web, fetch_url
+from sopno.tools.builtins.system.datetime_tool import get_current_time
+from sopno.tools.builtins.system.media import play_media_control
+from sopno.tools.builtins.dev.terminal import run_terminal, terminal_send, terminal_status
+from sopno.tools.builtins.system.manage import (
     list_processes,
     kill_process,
     manage_service,
     read_logs,
     manage_cron,
 )
-from sopno.tools.builtins.files import (
+from sopno.tools.builtins.files.files import (
     read_file,
     write_file,
     edit_file,
@@ -32,7 +37,7 @@ from sopno.tools.builtins.files import (
     move_file,
     search_files,
 )
-from sopno.tools.builtins.git import (
+from sopno.tools.builtins.dev.git import (
     git_status,
     git_log,
     git_diff,
@@ -42,8 +47,12 @@ from sopno.tools.builtins.git import (
     git_stash,
     git_commit_message,
 )
-from sopno.tools.builtins.reminders import set_reminder, list_reminders, cancel_reminder
-from sopno.tools.builtins.browser import (
+from sopno.tools.builtins.automation.reminders import (
+    set_reminder,
+    list_reminders,
+    cancel_reminder,
+)
+from sopno.tools.builtins.web.browser import (
     browser_navigate,
     browser_click,
     browser_type,
@@ -52,7 +61,7 @@ from sopno.tools.builtins.browser import (
     browser_back,
     browser_close,
 )
-from sopno.tools.builtins.desktop import (
+from sopno.tools.builtins.system.desktop import (
     clipboard_get,
     clipboard_set,
     take_screenshot,
@@ -64,30 +73,30 @@ from sopno.tools.builtins.desktop import (
     get_gpu_stats,
     get_network_stats,
 )
-from sopno.tools.builtins.databases import (
+from sopno.tools.builtins.data.databases import (
     query_database,
     explain_schema,
     backup_database,
 )
-from sopno.tools.builtins.packages import install_package, uninstall_package
-from sopno.tools.builtins.network import (
+from sopno.tools.builtins.data.packages import install_package, uninstall_package
+from sopno.tools.builtins.web.network import (
     ping_host,
     traceroute,
     wifi_scan,
     public_ip,
     firewall_status,
 )
-from sopno.tools.builtins.vision import describe_screenshot, ocr_image
-from sopno.tools.builtins.email import email_read, email_send
-from sopno.tools.builtins.calendar import calendar_list, calendar_create_event
-from sopno.tools.builtins.notes import note_write, note_list, note_search
-from sopno.tools.builtins.rules import (
+from sopno.tools.builtins.knowledge.vision import describe_screenshot, ocr_image
+from sopno.tools.builtins.knowledge.email import email_read, email_send
+from sopno.tools.builtins.knowledge.calendar import calendar_list, calendar_create_event
+from sopno.tools.builtins.knowledge.notes import note_write, note_list, note_search
+from sopno.tools.builtins.automation.rules import (
     rule_add,
     rule_list,
     rule_remove,
     rule_set_enabled,
 )
-from sopno.tools.builtins.subagents import run_subagent, subagent_list
+from sopno.tools.builtins.automation.subagents import run_subagent, subagent_list
 from sopno.llm.researcher import research
 
 

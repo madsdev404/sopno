@@ -26,8 +26,8 @@ from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import get_schema
 from sopno.tools.registry import execute_tool
-from sopno.tools.builtins.terminal import _close as close_terminal_shell
-from sopno.tools.builtins.files import pending_action, resolve_pending
+from sopno.tools.builtins.dev.terminal import _close as close_terminal_shell
+from sopno.tools.builtins.files.files import pending_action, resolve_pending
 from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe

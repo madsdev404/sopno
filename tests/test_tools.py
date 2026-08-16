@@ -8,8 +8,8 @@ import unittest
 from unittest.mock import patch, MagicMock
 
 from sopno.tools.registry import execute_tool, get_registered_names
-from sopno.tools.builtins.datetime_tool import get_current_time
-from sopno.tools.builtins.search import search_web, fetch_url, web_search
+from sopno.tools.builtins.system.datetime_tool import get_current_time
+from sopno.tools.builtins.web.search import search_web, fetch_url, web_search
 from sopno.tools.builtins.system import open_application, control_volume
 
 
@@ -142,7 +142,7 @@ class TestSopnoTools(unittest.TestCase):
     @patch("requests.get")
     def test_bing_parser_decodes_redirect_urls(self, mock_get) -> None:
         """Verify Bing redirect URLs are decoded to real result URLs."""
-        from sopno.tools.builtins.search import _bing_results
+        from sopno.tools.builtins.web.search import _bing_results
         mock_get.return_value = MagicMock(
             text=self._BING_HTML,
             status_code=200,
@@ -154,8 +154,8 @@ class TestSopnoTools(unittest.TestCase):
         self.assertEqual(results[0]["title"], "python.org")
         self.assertIn("Python Software Foundation", results[0]["snippet"])
 
-    @patch("sopno.tools.builtins.search._ddg_results")
-    @patch("sopno.tools.builtins.search._bing_results")
+    @patch("sopno.tools.builtins.web.search._ddg_results")
+    @patch("sopno.tools.builtins.web.search._bing_results")
     def test_web_search_merges_and_dedupes(self, mock_bing, mock_ddg) -> None:
         """Verify web_search merges engines and deduplicates by URL."""
         mock_bing.return_value = [
@@ -169,7 +169,7 @@ class TestSopnoTools(unittest.TestCase):
         urls = [r["url"] for r in results]
         self.assertEqual(urls, ["https://www.python.org/", "https://docs.python.org/"])
 
-    @patch("sopno.tools.builtins.search.web_search")
+    @patch("sopno.tools.builtins.web.search.web_search")
     def test_search_web_formats_results(self, mock_ws) -> None:
         """Verify search_web turns structured results into a spoken list."""
         mock_ws.return_value = [
@@ -180,8 +180,8 @@ class TestSopnoTools(unittest.TestCase):
         self.assertIn("https://www.python.org/", res)
         self.assertIn("PSF mission", res)
 
-    @patch("sopno.tools.builtins.search._ddg_results", side_effect=Exception("timeout"))
-    @patch("sopno.tools.builtins.search._bing_results", side_effect=Exception("timeout"))
+    @patch("sopno.tools.builtins.web.search._ddg_results", side_effect=Exception("timeout"))
+    @patch("sopno.tools.builtins.web.search._bing_results", side_effect=Exception("timeout"))
     def test_search_web_network_error(self, mock_bing, mock_ddg) -> None:
         """Verify search_web returns a graceful message when search fails."""
         self.assertTrue(search_web("hello").startswith("I couldn't find any results"))

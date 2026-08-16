@@ -143,7 +143,7 @@ sopno/                         ← project root
 ├── prompts/                   ← editable prompt templates (*.txt)
 ├── models/                    ← local AI model files (offline)
 ├── scripts/                   ← shell setup/deploy scripts
-├── tests/                     ← unit tests (unittest)
+├── tests/                     ← unit tests (unittest; voice/ core/ tools/ integration/)
 └── doc/                       ← documentation (this file lives here)
 ```
 
@@ -262,7 +262,7 @@ This is the most important file in the project. It:
   - "search X" / "google X" → `search_web`
 
 **`sopno/core/reminders.py`** — one-shot reminders (backing store for the
-`reminders.py` tools).
+`automation/reminders.py` tools).
 
 - `ReminderStore` — own SQLite DB (`settings.reminders_path`, WAL, RLock),
   rows `reminders(id, due_at, text, status, created_at)` with ISO timestamps and
@@ -281,7 +281,7 @@ This is the most important file in the project. It:
   when `reminders_enabled`.
 
 **`sopno/core/rules.py`** — automation rules ("if X then Y"), backing the
-`rules.py` tools.
+`automation/rules.py` tools.
 
 - `_evaluate(condition)` — allowlist condition grammar only: `metric op value`
   where metric ∈ {`battery_percent`, `cpu_percent`, `ram_percent`,
@@ -302,7 +302,7 @@ This is the most important file in the project. It:
   `_deliver_rule`, speech-locked). Started in `SopnoAssistant.run` when
   `rules_enabled`.
 
-**`sopno/core/subagents.py`** — multi-agent runners, backing the `subagents.py`
+**`sopno/core/subagents.py`** — multi-agent runners, backing the `automation/subagents.py`
 tools.
 
 - `_AGENT_PROMPTS` — focused system prompts for `researcher`, `coder`, `reviewer`.
@@ -587,9 +587,18 @@ tools.
   permission gates still apply on the wire.
 
 **`sopno/tools/builtins/`** — the skills themselves, one file per skill or small
-domain:
+domain, organised into category subpackages (the flat module names remain
+importable as `from sopno.tools.builtins import <name>` aliases):
 
-- **`system.py`** — OS-level tools.
+- `system/` — OS-level tools (`system`, `manage`, `desktop`, `media`, `datetime_tool`).
+- `files/` — permission-gated file access (`files`, `readers`).
+- `dev/` — developer tools (`terminal`, `git`).
+- `web/` — internet tools (`browser`, `search`, `network`).
+- `data/` — data tools (`databases`, `packages`).
+- `knowledge/` — knowledge tools (`vision`, `email`, `calendar`, `notes`).
+- `automation/` — proactive tools (`reminders`, `rules`, `subagents`).
+
+- **`system/system.py`** — OS-level tools.
   - `open_application(app_name)` — launches apps via `subprocess.Popen` using the
     `_APP_MAP` friendly-name → command table (chrome, firefox, files, terminal,
     vscode, spotify, calculator, settings).
@@ -598,10 +607,10 @@ domain:
     percent + charging status.
   - `lock_screen()` — `gnome-screensaver-command --lock`, falling back to
     `loginctl lock-session`.
-- **`search.py`** — `search_web(query)` runs a real multi-engine web search (Bing +
+- **`web/search.py`** — `search_web(query)` runs a real multi-engine web search (Bing +
   DuckDuckGo), merging and deduplicating results; `fetch_url(url)` downloads a page
   and extracts readable text (trafilatura, with Jina fallback).
-- **`terminal.py`** — real persistent shell access via `cleat` (a headless PTY with
+- **`dev/terminal.py`** — real persistent shell access via `cleat` (a headless PTY with
   OSC 133 output structure).
   - `run_terminal(command, timeout)` — runs a shell command; `cd`/`export`/background
     jobs persist between calls (one shared session). Long-running or interactive
@@ -612,7 +621,7 @@ domain:
   - Safety: destructive/irreversible commands are blocked via a configurable
     `terminal_blocklist` (`config.json`), and `curl|sh`-style pipe-to-shell is
     rejected.
-- **`manage.py`** — process / service / log / cron management, all routed through
+- **`system/manage.py`** — process / service / log / cron management, all routed through
   the shared terminal session (so blocklist + privilege rules apply).
   - `list_processes(query, limit)` — `ps aux --sort=-%cpu`, optional keyword filter.
   - `kill_process(target, signal)` — `kill` by PID or `pkill -x` by name; refuses
@@ -624,7 +633,7 @@ domain:
   - `manage_cron(action, schedule, command)` — list / add / remove crontab jobs
     (installed non-interactively via a temp file); refuses blocked commands and
     validates the schedule.
-- **`files.py`** — permission-gated file & folder access.
+- **`files/files.py`** — permission-gated file & folder access.
   - `read_file(path, lines)` — file contents (head/tail supported), capped output;
     PDFs/images/Office docs auto-route to the binary readers.
   - `write_file(path, content)` — create or overwrite; identical writes short-circuit.
@@ -649,7 +658,7 @@ domain:
     return a Yes/No prompt; the assistant asks the user (spoken in voice mode, typed
     in text mode) and resolves via `pending_action()` / `resolve_pending()` in
     `core/assistant.py`. Disable with `file_confirm_writes: false`.
-- **`readers.py`** — binary document readers used by `read_file` (all optional).
+- **`files/readers.py`** — binary document readers used by `read_file` (all optional).
   - `extract_text(path) -> (text, method)` routes by suffix: `.pdf` (PyMuPDF native
     text, OCR fallback for scanned pages), images `.png/.jpg/…` (Tesseract OCR),
     `.docx/.pptx/.xlsx` (python-docx/python-pptx/openpyxl), legacy `.doc/.xls/.ppt`
@@ -657,7 +666,7 @@ domain:
     (20) / `readers_max_chars` (20000); OCR gated by `file_ocr_enabled`.
   - `is_binary_like(path)` — document suffix or null-byte sniff, used by
     `read_file` routing and `search_files` skipping.
-- **`reminders.py`** — one-shot reminders (SQLite + background poller).
+- **`automation/reminders.py`** — one-shot reminders (SQLite + background poller).
   - `set_reminder(when, text)` — `parse_when` turns natural language ("in 10
     minutes", "9:30pm", "tomorrow 9am", "2026-08-20 14:30") into a due time;
     non-destructive (no confirmation). Caps: `reminders_max` pending (50),
@@ -668,7 +677,7 @@ domain:
     WAL, `pending → delivered | cancelled`), `parse_when`/`format_due`, and
     `ReminderPoller` (daemon thread, every `reminders_poll_seconds`, atomic
     at-least-once delivery into the reply flow; enabled by `reminders_enabled`).
-- **`browser.py`** — browser automation via Playwright (**opt-in**, heavy dep).
+- **`web/browser.py`** — browser automation via Playwright (**opt-in**, heavy dep).
   - Lazy singleton `BrowserSession`; if `browser_enabled` is false or Playwright
     isn't installed, every tool answers with a friendly message.
   - `browser_navigate(url)` — adds `https://` if needed, refuses domains outside
@@ -686,7 +695,7 @@ domain:
     per-step `browser_timeout` (30s) and whole-session `browser_task_limit`
     (120s) ceiling; page content is treated as untrusted (no prompt-injection
     into actions).
-- **`desktop.py`** — desktop control + hardware reads, **X11-first** with honest
+- **`system/desktop.py`** — desktop control + hardware reads, **X11-first** with honest
   degradation: every dependency is optional and detected at runtime via
   `shutil.which` (missing binaries → friendly "install X" messages instead of
   crashes). Input/window/clipboard tools check `_gate(x11=True)`, which refuses
@@ -703,9 +712,9 @@ domain:
     `sensors_fans` (snap/loop mounts filtered); `get_network_stats()` — per-NIC
     RX/TX; `get_gpu_stats()` — pynvml (`import pynvml` inside the call, so no
     hard dependency), reports name/util/VRAM/temp or "No NVIDIA GPU detected".
-  - `open_application` (in `system.py`) honours `desktop_allowed_apps` when the
+  - `open_application` (in `system/system.py`) honours `desktop_allowed_apps` when the
     list is non-empty, and `get_system_stats` now appends disk + CPU temperature.
-- **`databases.py`** — read-only SQLite first.
+- **`data/databases.py`** — read-only SQLite first.
   - `query_database(path, sql)` — reads (SELECT/PRAGMA/EXPLAIN/WITH) run
     immediately on a `file:…?mode=ro` URI connection; mutating statements park
     a pending-action Yes/No gate and execute on a read-write connection when
@@ -715,7 +724,7 @@ domain:
   - `backup_database(path, destination)` — live consistent copy via the SQLite
     backup API (safe for in-use DBs); destination must be inside the write
     roots, overwrite confirmed, default `<name>.backup.db`.
-- **`packages.py`** — package management, every action confirmed.
+- **`data/packages.py`** — package management, every action confirmed.
   - `install_package(name, manager)` — `auto` detects apt/pacman/dnf from
     `/etc/os-release` (fallback pip); explicit managers include flatpak.
     System managers wrap in `sudo -n` (non-interactive — never hangs, fails
@@ -725,7 +734,7 @@ domain:
     (`packages_uninstall_allowed = false`), confirmed when enabled.
   - Names validated against a safe character set (no shell metacharacters, no
     `..`, length caps).
-- **`network.py`** — networking, read-only by default.
+- **`web/network.py`** — networking, read-only by default.
   - `ping_host(host)` (`ping -c 4`), `traceroute(host)` (`traceroute -m 15`,
     friendly message if not installed), `wifi_scan()` (`nmcli`), and
     `firewall_status()` (`ufw status verbose`) are harmless reads.
@@ -733,21 +742,21 @@ domain:
     is **disabled unless `network_public_ip_enabled = true`**.
   - `firewall_status("on"/"off")` is the only mutating path — confirmed and run
     via `sudo -n ufw <action>`. Host arguments are strictly validated.
-- **`vision.py`** — image understanding.
+- **`knowledge/vision.py`** — image understanding.
   - `describe_screenshot(path)` — **opt-in** (`vision_enabled` + `vision_model`,
     e.g. `qwen2.5vl:7b`); reads the image bytes, base64-encodes them as a
     `data:` URI, and POSTs to Ollama's `/api/chat`. Gated by the file read
     roots and an 8 MB cap; friendly "vision is off" message otherwise.
   - `ocr_image(path)` — pytesseract first, then a `tesseract <file> stdout`
     subprocess fallback; a clear install hint when neither exists.
-- **`email.py`** — **opt-in only** (`email_enabled`). Passwords never live in
+- **`knowledge/email.py`** — **opt-in only** (`email_enabled`). Passwords never live in
   config.json — they come from the env var named by `email_password_env`
   (default `SOPNO_EMAIL_PASSWORD`).
   - `email_read(limit, mailbox)` — read-only IMAP4_SSL, lists the newest
     messages as subject / from / plain-text snippet.
   - `email_send(to, subject, body)` — SMTP + STARTTLS, **confirmed**; recipient
     is validated against a safe charset, subject must be one line, body capped.
-- **`calendar.py`** — file-based ICS, no external service.
+- **`knowledge/calendar.py`** — file-based ICS, no external service.
   - `calendar_list(limit)` — parses `BEGIN:VEVENT` blocks out of every `.ics`
     under `calendar_dir` (datetime regex `YYYYMMDD[T]HHMMSS[Z]` or date-only)
     and lists the upcoming ones, sorted by start time.
@@ -755,13 +764,13 @@ domain:
     `YYYY-MM-DD HH:MM` input, builds an escaped VEVENT and appends it to
     `calendar.ics` (write-root gated + confirmed; creates the VCALENDAR
     wrapper on first use).
-- **`notes.py`** — markdown knowledge base under `notes_dir`
+- **`knowledge/notes.py`** — markdown knowledge base under `notes_dir`
   (default `sopno/memory/notes`).
   - `note_write(title, content)` — sanitised title → `<title>.md`; confirmed,
     with a separate overwrite confirmation.
   - `note_list()` — names + sizes + mtimes; `note_search(query)` — read-only
     case-insensitive grep returning matching line snippets.
-- **`rules.py`** — automation rules ("if X then Y"), backed by
+- **`automation/rules.py`** — automation rules ("if X then Y"), backed by
   `sopno/core/rules.py`.
   - `rule_add(name, condition, action)` — condition is an allowlist grammar
     `metric op value` (metrics: `battery_percent`, `cpu_percent`, `ram_percent`,
@@ -771,14 +780,14 @@ domain:
     pending-action gate (if any) is auto-approved.
   - `rule_list()` read-only; `rule_remove(id)` and
     `rule_set_enabled(id, enabled)` confirmed.
-- **`subagents.py`** — delegate to focused workers, backed by
+- **`automation/subagents.py`** — delegate to focused workers, backed by
   `sopno/core/subagents.py`.
   - `run_subagent(agent, task)` — researcher (search/fetch/read), coder
     (files/git/terminal), or reviewer (read-only files/git/logs). Each has a
     focused system prompt and a **restricted** `TOOLS_SCHEMA`; runs the same
     Ollama tool-calling loop as the main assistant and returns plain text.
   - `subagent_list()` — names of the available subagents.
-- **`git.py`** — git repository tools, all routed through the shared terminal
+- **`dev/git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
   - `git_status(repo)` — `git status --short --branch` + last 10 commits.
@@ -795,9 +804,9 @@ domain:
     LLM and returns a conventional `type(scope): summary` + body suggestion.
   - Values interpolated into git arguments are shlex-quoted and checked against
     shell metacharacters; the `git_enabled` master switch is in `config.json`.
-- **`datetime_tool.py`** — `get_current_time()` returns e.g.
+- **`system/datetime_tool.py`** — `get_current_time()` returns e.g.
   "It is 09:41 AM on Thursday, August 13."
-- **`media.py`** — `play_media_control(action)` controls media players via
+- **`system/media.py`** — `play_media_control(action)` controls media players via
   `playerctl` (MPRIS). Requires `playerctl` and a running media player.
 
 ### 6.6 `ui/` — What You See
@@ -913,19 +922,21 @@ Shell setup / deployment scripts.
 
 ### 7.4 `tests/`
 
-Unit tests using Python's standard `unittest` library. Run with:
+Unit tests using Python's standard `unittest` library, organised into
+subpackages that mirror the codebase (each directory is a package, so
+`unittest discover` recurses into it). Run with:
 
 ```bash
 python3 -m unittest discover -s tests
 ```
 
-| File | What it verifies |
+| Subpackage / file | What it verifies |
 |------|------------------|
-| `test_assistant.py` | `ConversationContext` lifecycle + language constraints; `CommandDispatcher` routing patterns (time, open, search, unknown → LLM) |
-| `test_stt.py` | `transcribe()` prefers Whisper; Google fallback only fires when `stt_online_fallback` is `True`; offline default raises `UnknownValueError` |
-| `test_tools.py` | Registry contains all 7 tools; `get_current_time()` format; `open_application` and `control_volume` subprocess calls |
-| `test_tts.py` | `_is_bangla()` detection; `speak()` routes to the active engine and ignores empty text |
-| `test_wakeword.py` | WakeWordDetector falls back when model files are missing; fallback detects / ignores wake words; detector is lazy-created; listening-mode defaults |
+| `voice/` | Audio stack: `test_tts.py` (`_is_bangla()` + engine routing), `test_stt.py` (Whisper-first, Google fallback only when enabled), `test_wakeword.py` (fallback + lazy detector), `test_barge.py` (interrupt logic) |
+| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py` |
+| `tools/` | One file per skill: `test_browser.py`, `test_calendar.py`, `test_databases.py`, `test_desktop.py`, `test_email.py`, `test_files.py`, `test_git.py`, `test_manage.py`, `test_network.py`, `test_notes.py`, `test_packages.py`, `test_readers.py`, `test_terminal.py`, `test_vision.py` |
+| `integration/` | Cross-cutting: `test_mcp.py` (client/server), `test_plugins.py` (dynamic loader) |
+| `test_tools.py` | Registry-level checks (all registered tools present, tool output formats, subprocess call wiring) |
 
 ### 7.5 Root files
 
@@ -1010,8 +1021,10 @@ All settings live in **`config.json`** at the repo root and are read by
 Because the project is modular, most changes are local and low-risk:
 
 **Add a new tool (skill)**
-1. Create `sopno/tools/builtins/your_tool.py` with a function that returns a
-   short, speakable string.
+1. Create `sopno/tools/builtins/<category>/your_tool.py` (drop it into the most
+   fitting category subpackage — `system/`, `files/`, `dev/`, `web/`, `data/`,
+   `knowledge/`, or `automation/`) with a function that returns a short, speakable
+   string, then add it to that category's `__init__.py` so it is re-exported.
 2. Register it in `sopno/tools/registry.py` (`_REGISTRY`).
 3. Add its schema to `TOOLS_SCHEMA` in `sopno/tools/schema.py` so the LLM can call
    it.

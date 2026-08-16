@@ -323,7 +323,7 @@ def _research_query(question: str) -> str:
 
 def _fetch_pages(results: list[dict], max_pages: int, index: ResearchIndex) -> list[dict]:
     """Fetch page texts in parallel, reusing cached text where possible."""
-    from sopno.tools.builtins.search import fetch_page_text
+    from sopno.tools.builtins.web.search import fetch_page_text
 
     def one(r: dict) -> Optional[dict]:
         url = r["url"]
@@ -412,7 +412,7 @@ def research(query: str, max_pages: Optional[int] = None) -> str:
     max_pages = max(1, min(int(max_pages or settings.research_max_pages), 10))
 
     # 1. Search the web (free engines).
-    from sopno.tools.builtins.search import web_search
+    from sopno.tools.builtins.web.search import web_search
 
     try:
         results = web_search(
