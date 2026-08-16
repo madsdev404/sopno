@@ -24,6 +24,7 @@ from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import TOOLS_SCHEMA
 from sopno.tools.registry import execute_tool
+from sopno.tools.builtins.terminal import _close as close_terminal_shell
 from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
@@ -41,6 +42,8 @@ _TOOLISH = re.compile(
     r"fetch|read|url|web|website|site|page|"
     r"research|find out|look up|tell me about|what is|what are|who is|"
     r"latest|news|update|fact|define|explain|"
+    r"terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"
+    r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
     r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ"
     r")\b",
     re.IGNORECASE,
@@ -203,6 +206,7 @@ class SopnoAssistant:
     def stop(self) -> None:
         """Stop the assistant loop."""
         self.running = False
+        close_terminal_shell()
         self._text_event.set()
 
     def set_interaction_mode(self, mode: str) -> None:

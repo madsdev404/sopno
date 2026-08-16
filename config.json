@@ -33,5 +33,20 @@
   "research_chunk_chars": 1800,
   "research_top_k": 6,
   "research_summary_tokens": 800,
-  "research_summary_ctx": 8192
+  "research_summary_ctx": 8192,
+  "terminal_enabled": true,
+  "terminal_shell": "/bin/bash",
+  "terminal_timeout": 30,
+  "terminal_max_timeout": 300,
+  "terminal_output_chars": 4000,
+  "terminal_blocklist": [
+    "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
+    "rm -rf /", "rm -fr /", "rm -rf /*", "rm -fr /*",
+    "rm -rf ~", "rm -fr ~", "sudo rm -rf /",
+    "mkfs", "fdisk", "parted", "mkpart", "mkswap",
+    "fork bomb", ":(){",
+    "chmod -R 777 /", "chmod 777 /",
+    "> /dev/sda", "> /dev/sdb", "> /dev/sdc", "> /dev/sdd",
+    "of=/dev/sda", "of=/dev/sdb", "of=/dev/sdc"
+  ]
 }

@@ -116,6 +116,32 @@ class Settings:
         # Context window for the summarization call (chunks are large).
         self.research_summary_ctx: int = int(data.get("research_summary_ctx", 8192))
 
+        # ── Terminal (persistent shell) ───────────────────────
+        # Master switch for terminal access (cleat persistent PTY shell).
+        self.terminal_enabled: bool = bool(data.get("terminal_enabled", True))
+        # Shell binary for the persistent session.
+        self.terminal_shell: str = data.get("terminal_shell", "/bin/bash")
+        # Default wait (seconds) for run_terminal before returning partial output.
+        self.terminal_timeout: int = int(data.get("terminal_timeout", 30))
+        # Hard cap on how long a single run_terminal may block.
+        self.terminal_max_timeout: int = int(data.get("terminal_max_timeout", 300))
+        # Output shown to the LLM per call (tail kept when longer).
+        self.terminal_output_chars: int = int(data.get("terminal_output_chars", 4000))
+        # Destructive/irreversible command patterns (lowercase substrings).
+        self.terminal_blocklist: list = data.get(
+            "terminal_blocklist",
+            [
+                "shutdown", "reboot", "halt", "poweroff", "init 0", "init 6",
+                "rm -rf /", "rm -fr /", "rm -rf /*", "rm -fr /*",
+                "rm -rf ~", "rm -fr ~", "sudo rm -rf /",
+                "mkfs", "fdisk", "parted", "mkpart", "mkswap",
+                "fork bomb", ":(){",
+                "chmod -R 777 /", "chmod 777 /",
+                "> /dev/sda", "> /dev/sdb", "> /dev/sdc", "> /dev/sdd",
+                "of=/dev/sda", "of=/dev/sdb", "of=/dev/sdc",
+            ],
+        )
+
         # ── Paths ─────────────────────────────────────────────
         self.project_root: Path     = _PROJECT_ROOT
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"

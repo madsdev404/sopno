@@ -377,13 +377,18 @@ This is the most important file in the project. It:
 ### 6.5 `tools/` — What Sopno Can Do
 
 **`sopno/tools/schema.py`** — `TOOLS_SCHEMA`, the JSON tool-calling schema handed to
-the LLM (OpenAI-style `function` objects). It defines 7 tools:
+the LLM (OpenAI-style `function` objects). It defines 12 tools:
 
 | Tool | Purpose | Arguments |
 |------|---------|-----------|
 | `get_current_time` | Time, date, weekday | — |
 | `open_application` | Launch a desktop app | `app_name` |
-| `search_web` | Google search in browser | `query` |
+| `search_web` | Multi-engine web search | `query` |
+| `fetch_url` | Fetch a URL as readable text | `url` |
+| `research` | Deep, cited web research (RAG) | `query` |
+| `run_terminal` | Run a shell command persistently | `command`, `timeout` |
+| `terminal_send` | Send keys/stdin to the running program | `keys`, `enter` |
+| `terminal_status` | Poll the terminal session state | — |
 | `control_volume` | Volume up/down/mute | `action` |
 | `get_system_stats` | CPU/RAM/battery | — |
 | `lock_screen` | Lock the desktop | — |
@@ -408,8 +413,20 @@ domain:
     percent + charging status.
   - `lock_screen()` — `gnome-screensaver-command --lock`, falling back to
     `loginctl lock-session`.
-- **`search.py`** — `search_web(query)` opens a Google search URL in the default
-  browser via `webbrowser`.
+- **`search.py`** — `search_web(query)` runs a real multi-engine web search (Bing +
+  DuckDuckGo), merging and deduplicating results; `fetch_url(url)` downloads a page
+  and extracts readable text (trafilatura, with Jina fallback).
+- **`terminal.py`** — real persistent shell access via `cleat` (a headless PTY with
+  OSC 133 output structure).
+  - `run_terminal(command, timeout)` — runs a shell command; `cd`/`export`/background
+    jobs persist between calls (one shared session). Long-running or interactive
+    commands return partial output plus the session state.
+  - `terminal_send(keys, enter)` — sends stdin / control keys (`ctrl-c`, `ctrl-d`,
+    `ctrl-z`) to the running program (REPLs, installers, password prompts).
+  - `terminal_status()` — polls the session without sending anything.
+  - Safety: destructive/irreversible commands are blocked via a configurable
+    `terminal_blocklist` (`config.json`), and `curl|sh`-style pipe-to-shell is
+    rejected.
 - **`datetime_tool.py`** — `get_current_time()` returns e.g.
   "It is 09:41 AM on Thursday, August 13."
 - **`media.py`** — `play_media_control(action)` controls media players via
@@ -580,6 +597,12 @@ All settings live in **`config.json`** at the repo root and are read by
 | `hud_opacity` | `0.85` | HUD background opacity |
 | `hud_position` | `top-right` | Where the HUD appears |
 | `max_history_length` | `13` | Message count that triggers history summarization |
+| `terminal_enabled` | `true` | Master switch for terminal access (`run_terminal` & co.) |
+| `terminal_shell` | `/bin/bash` | Shell binary for the persistent PTY session |
+| `terminal_timeout` | `30` | Default seconds `run_terminal` waits for completion |
+| `terminal_max_timeout` | `300` | Hard cap on a single `run_terminal` wait |
+| `terminal_output_chars` | `4000` | Output chars shown to the LLM per call (tail kept) |
+| `terminal_blocklist` | *(destructive patterns)* | Lowercase substrings that are blocked from execution |
 
 ---
 

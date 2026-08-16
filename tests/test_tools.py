@@ -28,6 +28,9 @@ class TestSopnoTools(unittest.TestCase):
         self.assertIn("lock_screen", names)
         self.assertIn("play_media_control", names)
         self.assertIn("research", names)
+        self.assertIn("run_terminal", names)
+        self.assertIn("terminal_send", names)
+        self.assertIn("terminal_status", names)
 
     def test_get_current_time(self) -> None:
         """Verify datetime string conforms to standard pattern (e.g. 'It is ... on ...')."""

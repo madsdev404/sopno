@@ -91,6 +91,60 @@ TOOLS_SCHEMA = [
     {
         "type": "function",
         "function": {
+            "name": "run_terminal",
+            "description": "Run a shell command in Sopno's persistent terminal session and return the output and exit code. cd/export/background jobs persist between calls. For long-running or interactive commands, returns partial output with the session state; use terminal_send to send input and terminal_status to check progress. Destructive commands are blocked for safety.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "command": {
+                        "type": "string",
+                        "description": "The shell command to run (e.g. 'pip install requests' or 'git log --oneline -5')."
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Optional seconds to wait for completion (default 30, max 300)."
+                    }
+                },
+                "required": ["command"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "terminal_send",
+            "description": "Send keys or stdin to the program currently running in the terminal session. Use for REPLs, installers, password prompts, or to interrupt a stuck command. Control keys: 'ctrl-c', 'ctrl-d', 'ctrl-z'.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "Text to type, or 'ctrl-c' / 'ctrl-d' / 'ctrl-z' for a control key."
+                    },
+                    "enter": {
+                        "type": "boolean",
+                        "description": "Press Enter after the keys (default false)."
+                    }
+                },
+                "required": ["keys"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "terminal_status",
+            "description": "Check what the terminal session is doing now without sending anything: current output, whether the command finished (and its exit code), and the session state.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "control_volume",
             "description": "Control the PC speaker volume (up to raise, down to lower, toggle to mute/unmute).",
             "parameters": {

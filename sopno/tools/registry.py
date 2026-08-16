@@ -13,6 +13,7 @@ from sopno.tools.builtins.system import open_application, control_volume, get_sy
 from sopno.tools.builtins.search import search_web, fetch_url
 from sopno.tools.builtins.datetime_tool import get_current_time
 from sopno.tools.builtins.media import play_media_control
+from sopno.tools.builtins.terminal import run_terminal, terminal_send, terminal_status
 from sopno.llm.researcher import research
 
 
@@ -27,6 +28,9 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "lock_screen": lock_screen,
     "play_media_control": play_media_control,
     "research": research,
+    "run_terminal": run_terminal,
+    "terminal_send": terminal_send,
+    "terminal_status": terminal_status,
 }
 
 

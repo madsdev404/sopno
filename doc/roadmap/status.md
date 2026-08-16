@@ -45,10 +45,21 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 * [ ] **Semantic Recall (future):** `sqlite-vec` embeddings for automatic similarity-based recall.
 * Design spec: [modules/memory/memory.md](../modules/memory/memory.md)
 
+### 7. Terminal Access (Persistent Shell) — **[COMPLETED]**
+* [x] **Persistent Shell Session:** One shared `cleat` PTY shell per Sopno process; `cd`, `export`, and background jobs persist between calls.
+* [x] **Structured Output + Real Exit Codes:** OSC 133 marks give Sopno clean stdout and genuine exit codes (no brittle prompt parsing).
+* [x] **Interactive Support:** `terminal_send` types into REPLs, installers, and password prompts (`ctrl-c`/`ctrl-d`/`ctrl-z`); `terminal_status` polls long-runners without interfering.
+* [x] **Safety Blocklist:** Destructive/irreversible patterns (`rm -rf /`, `mkfs`/`fdisk`, shutdown/reboot, fork bombs, raw disk writes, `curl|sh`) are blocked; fully configurable via `terminal_blocklist` in `config.json`.
+* [x] **Graceful Shutdown:** The shared shell session closes when Sopno stops.
+
 ---
 
 ## 📓 Technical Progress Log
 
+### [August 16, 2026] — Step 10: Terminal Access (Persistent Shell)
+* **Added Files:** `sopno/tools/builtins/terminal.py`, `tests/test_terminal.py`
+* **Modified Files:** `sopno/tools/registry.py`, `sopno/tools/schema.py`, `sopno/config/settings.py`, `config.json`, `sopno/core/assistant.py`, `requirements.txt`, `tests/test_tools.py`, `doc/CODEBASE.md`
+* **Impact:** Sopno can now execute real shell commands through a persistent, structured PTY session (`cleat`): `run_terminal` runs commands with real exit codes, `terminal_send` types into interactive programs, and `terminal_status` polls long-running jobs without interfering. `cd`/`export`/background jobs persist across calls. Destructive or irreversible commands are blocked by a configurable safety blocklist (`terminal_blocklist`), and the session closes cleanly on shutdown.
 ### [August 14, 2026] — Step 9: Barge-In (Interruptible Voice)
 * **Added Files:** `sopno/voice/barge.py`, `tests/test_barge.py`
 * **Modified Files:** `sopno/voice/tts.py`, `sopno/core/assistant.py`, `sopno/config/settings.py`, `config.json`, `tests/test_tts.py`, `doc/CODEBASE.md`

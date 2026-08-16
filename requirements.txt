@@ -24,5 +24,8 @@ ddgs
 trafilatura
 sqlite-vec
 
+# Terminal access (persistent shell via cleat)
+cleat
+
 # System & Diagnostics skills
 psutil
