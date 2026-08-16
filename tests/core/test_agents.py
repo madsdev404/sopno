@@ -33,6 +33,7 @@ class ValidTransitionTest(unittest.TestCase):
             ("running", "done"),
             ("running", "blocked"),
             ("running", "dead"),
+            ("running", "ready"),  # job turn budget → dormancy, still resumable
             ("waiting_human", "running"),
             ("waiting_human", "done"),
             ("blocked", "running"),
@@ -149,6 +150,18 @@ class SessionStoreTest(unittest.TestCase):
         self.assertEqual(session["alignment"][0]["text"], "prefer citations")
         self.assertEqual(session["budget"], {"max_turns": 50})
         self.assertEqual(session["budget_used"], 3)
+
+    def test_kind_and_pending_action_roundtrip(self) -> None:
+        coding = self.store.create("coder", "g", kind="coding")
+        general = self.store.create("plain", "g")
+        self.assertEqual(self.store.get(coding)["kind"], "coding")
+        self.assertEqual(self.store.get(general)["kind"], "general")
+        self.store.set_kind(coding, "general")
+        self.assertEqual(self.store.get(coding)["kind"], "general")
+        self.store.set_pending_action(coding, {"id": "p", "description": "X"})
+        self.assertEqual(self.store.get(coding)["pending_action"]["id"], "p")
+        self.store.set_pending_action(coding, None)
+        self.assertIsNone(self.store.get(coding)["pending_action"])
 
     def test_action_log_is_append_only(self) -> None:
         agent_id = self.store.create("audit", "g")

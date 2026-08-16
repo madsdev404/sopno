@@ -1476,6 +1476,167 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
                 "required": ["action"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_create",
+            "description": "Create a durable background agent with a goal it keeps making progress on, optionally on a schedule, with a tool allowlist and budget. Use agent_status to watch it, agent_send to talk to it.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "Unique agent name (identity across restarts)."
+                    },
+                    "goal": {
+                        "type": "string",
+                        "description": "The objective, written down so a fresh context can resume it."
+                    },
+                    "schedule": {
+                        "type": "string",
+                        "description": "Optional trigger: interval:<seconds>, cron:<min hour dom month dow>, or eta:YYYY-MM-DD HH:MM:SS."
+                    },
+                    "tools": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional tool allowlist; empty = all safe tools."
+                    },
+                    "budget": {
+                        "type": "object",
+                        "description": "Optional ceilings: max_turns, max_wall_minutes, max_actions_per_day."
+                    },
+                    "task_type": {
+                        "type": "string",
+                        "enum": ["general", "coding"],
+                        "description": "general = LLM loop, coding = CodingAgent in a git worktree."
+                    }
+                },
+                "required": ["name", "goal"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_list",
+            "description": "List all background agents with their state, schedule, and budget usage.",
+            "parameters": {
+                "type": "object",
+                "properties": {},
+                "required": []
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_status",
+            "description": "Show a background agent's state, goal, budget usage, and recent activity.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_send",
+            "description": "Send a message to a background agent (wakes it from waiting_human / dormant). A parked approval is answered: 'yes' approves, anything else declines.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "What to tell it, e.g. 'yes, go ahead'."
+                    }
+                },
+                "required": ["name", "message"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_pause",
+            "description": "Pause a background agent: it stops being scheduled/resumed until agent_resume. Queued jobs are cancelled.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_resume",
+            "description": "Resume a paused or parked background agent (queues a resume job).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_kill",
+            "description": "Terminate a background agent permanently (confirmed). Jobs cancelled, schedule cleared, session marked dead.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_log",
+            "description": "Show a background agent's append-only audit trail (actions, messages, transitions, errors).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many entries to show (max 100)."
+                    }
+                },
+                "required": ["name"]
+            }
+        }
     }
 ]
 

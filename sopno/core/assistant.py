@@ -227,6 +227,7 @@ class SopnoAssistant:
         self._reminder_poller: Optional[ReminderPoller] = None
         self._rule_poller: Optional[RulePoller] = None
         self._rule_store: Optional[RuleStore] = None
+        self._agent_runtime = None
         # Serializes speech so a fired reminder never overlaps a spoken reply.
         self._speech_lock = threading.Lock()
 
@@ -270,6 +271,12 @@ class SopnoAssistant:
             except Exception:  # noqa: BLE001
                 pass
             self._rule_store = None
+        if self._agent_runtime is not None:
+            try:
+                self._agent_runtime.stop()
+            except Exception as e:  # noqa: BLE001
+                self.on_log_message(f"[Agents] stop failed: {e}")
+            self._agent_runtime = None
         if self._mcp_hub is not None:
             try:
                 self._mcp_hub.close()
@@ -741,6 +748,16 @@ class SopnoAssistant:
             self._rule_poller.start()
             self.on_log_message(
                 f"Automation rules enabled (poll every {settings.rules_poll_seconds}s)."
+            )
+
+        # Background long-running agents — workers + scheduler + watchdog.
+        if getattr(settings, "agents_enabled", True):
+            from sopno.core.agents.runtime import AgentRuntime
+            self._agent_runtime = AgentRuntime(run_check=lambda: self.running)
+            self._agent_runtime.start()
+            self.on_log_message(
+                f"Background agents enabled "
+                f"({settings.agents_concurrency} worker(s))."
             )
 
         while self.running:

@@ -63,6 +63,29 @@ class WorktreeSession:
         self.branch = branch
         return ""
 
+    def attach(self, branch: str, base: Optional[str] = None) -> str:
+        """
+        Reattach to an existing worktree (crash-resume): the branch keeps its
+        checkpoint commits and harness docs, so the loop continues from the last
+        commit instead of restarting. Returns an error string or ''.
+        """
+        self.worktree_dir.mkdir(parents=True, exist_ok=True)
+        target = self.worktree_dir / branch.split("/")[-1]
+        if not target.is_dir():
+            return f"no worktree found for branch {branch}"
+        res = self.git_runner("branch --show-current", str(target))
+        current = (res.get("stdout") or "").strip()
+        if current != branch:
+            return f"worktree {target} is on branch {current}, not {branch}"
+        self.worktree = target
+        self.branch = branch
+        self.base_sha = base or self.head()
+        log = self.git_runner(
+            f"log --format=%H {q(self.base_sha)}..HEAD", str(target)
+        )
+        self.commits = [sha for sha in (log.get("stdout") or "").split() if sha]
+        return ""
+
     def checkpoint(self, note: str) -> Optional[str]:
         """Commit all current changes; returns the commit sha or None."""
         assert self.worktree is not None

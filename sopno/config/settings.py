@@ -221,6 +221,19 @@ class Settings:
         self.agents_backoff_base: float = float(data.get("agents_backoff_base", 5))
         self.agents_backoff_cap: float = float(data.get("agents_backoff_cap", 3600))
         self.agents_max_attempts: int = int(data.get("agents_max_attempts", 3))
+        # How often the AgentScheduler checks session schedules (cron /
+        # interval / ETA triggers) and fires due ones into the queue.
+        self.agents_poll_seconds: float = float(data.get("agents_poll_seconds", 30))
+        # Worker tuning: poll cadence for claiming jobs, per-job turn ceiling
+        # (before a job parks the session back to 'ready'), and how often the
+        # runtime watchdog reclaims stale 'running' sessions on a dead worker.
+        self.agents_worker_poll_seconds: float = float(
+            data.get("agents_worker_poll_seconds", 2.0)
+        )
+        self.agents_job_max_turns: int = int(data.get("agents_job_max_turns", 20))
+        self.agents_watchdog_seconds: float = float(
+            data.get("agents_watchdog_seconds", 300)
+        )
 
         # ── Autonomous coding ────────────────────────────────
         # CodingAgent loop (sopno/core/coding.py). Worktrees live under

@@ -432,9 +432,34 @@ store reopen; malformed `when` → friendly error.
 > concurrency/lease/backoff/max_attempts) + `coding_*` (enabled/worktree_dir/
 > max_turns/max_tokens/max_wall_minutes/max_diff_lines/stall_rounds/
 > approval_mode/protected_paths/require_red_test/push_enabled). 38 tests → 527.
-> **Remaining wiring:** a daemon scheduler that polls the queue and runs sessions
-> in the background, and the `run_coding_task` entry point that bridges a queued
-> session to `CodingAgent`.
+
+> **✅ STEP 3 of `long-running-agents.md` done (Step 24):** `AgentScheduler`
+> (`scheduler.py`) — a polled daemon that parses `interval:` / `cron:` / `eta:`
+> trigger specs, computes next-fire times, and fires due triggers into `run`
+> jobs on the queue (idempotency-keyed per cadence; `last_fired_at` checkpoint
+> added to the session store with a migration). `AgentEvents` (`events.py`) —
+> the wake channel: a message + atomic `state_delta` become pending input + a
+> `resume` job, so parked `waiting_human` sessions resume on events. Config:
+> `agents_poll_seconds`. 26 tests → 553.
+
+> **✅ STEPS 4–7 of `long-running-agents.md` done (Step 25):** `AgentWorker`
+> (`worker.py`) — a daemon that claims `run`/`resume` jobs and drives the agent
+> loop (ORIENT → DECIDE → ACT → OBSERVE): per-agent lock (one session → one
+> driver), session transitions, tool-call execution against the agent's tool
+> allowlist (management tools excluded by default), approval-gate parking into
+> `waiting_human` with the pending action checkpointed, queued human input
+> drained on resume, budgets (`max_turns`/`max_wall_minutes`/`max_actions_per_day`)
+> enforced to `dead`, per-job turn budget → dormancy back to `ready`, and a
+> `kind='coding'` bridge that routes sessions into `run_coding_task`. `AgentRuntime`
+> (`runtime.py`) — the lifecycle owner: boots workers + scheduler + watchdog,
+> recovers orphan jobs and reclaims stale `running` sessions on start; wired into
+> `SopnoAssistant.run()`/`stop()` behind `agents_enabled`. Agent tools
+> (`tools/builtins/automation/agents.py`: `agent_create`/`agent_list`/
+> `agent_status`/`agent_send`/`agent_pause`/`agent_resume`/`agent_kill`/`agent_log`)
+> registered in `registry.py` + `schema.py`. `CodingAgent` now persists a
+> coding-worktree record in the session's working memory and reattaches to the
+> same branch on resume (`worktree.attach`). Config: `agents_worker_poll_seconds`,
+> `agents_job_max_turns`, `agents_watchdog_seconds`. 34 tests → 587.
 
 ## Dependency & safety summary
 - Every new tool registers in `registry.py` + `schema.py` + `builtins/__init__.py`.

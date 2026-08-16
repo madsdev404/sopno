@@ -221,6 +221,40 @@ class CodingAgentTest(unittest.TestCase):
         self.assertEqual(result["changes"], 0)
         self.assertFalse((self.repo / "sopno" / "hello.py").exists())
 
+    def test_resume_reuses_the_branch(self) -> None:
+        from sopno.core.agents.session import AgentSessionStore
+
+        store = AgentSessionStore(tempfile.mkstemp(suffix=".db")[1])
+        agent_id = store.create("coder", "Add a helper", kind="coding")
+        try:
+            first = CodingAgent(
+                repo=self.repo, worktree_dir=self.root / "worktrees",
+                llm_step=scripted([
+                    tool_call("write_file", path="sopno/h.py", content="x = 1\n"),
+                    final("First step done."),
+                ]),
+                git_runner=git_runner(), verify_runner=verify_runner(),
+                store=store, session_id=agent_id,
+            ).run({"goal": "Add a helper.", "paths_allowed": ["sopno"],
+                   "verify_recipe": RECIPE})
+            self.assertEqual(first["state"], "success")
+
+            # A later run on the same session reattaches to the branch instead
+            # of starting a fresh one — the checkpoint survives.
+            second = CodingAgent(
+                repo=self.repo, worktree_dir=self.root / "worktrees",
+                llm_step=scripted([final("Continuing — now it is done.")]),
+                git_runner=git_runner(), verify_runner=verify_runner(),
+                store=store, session_id=agent_id,
+            ).run({"goal": "Add a helper.", "paths_allowed": ["sopno"],
+                   "verify_recipe": RECIPE})
+            self.assertEqual(second["branch"], first["branch"])
+            self.assertTrue(
+                (Path(second["worktree"]) / "sopno" / "h.py").is_file()
+            )
+        finally:
+            store.close()
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -46,7 +46,10 @@ _STATES = frozenset({
 _TRANSITIONS: dict[str, frozenset[str]] = {
     "created": frozenset({"ready", "dead"}),
     "ready": frozenset({"running", "dead"}),
-    "running": frozenset({"running", "waiting_human", "done", "blocked", "dead"}),
+    # ``running -> ready`` is how a worker parks a session that has made
+    # progress on a job but is now dormant until its next trigger (schedule /
+    # event / manual resume). It is NOT a failure — it is event-driven dormancy.
+    "running": frozenset({"running", "ready", "waiting_human", "done", "blocked", "dead"}),
     "waiting_human": frozenset({"running", "done", "dead"}),
     "blocked": frozenset({"running", "done", "dead"}),
     "done": frozenset(),
@@ -60,14 +63,17 @@ CREATE TABLE IF NOT EXISTS agents (
     goal TEXT NOT NULL,
     state TEXT NOT NULL DEFAULT 'created',
     status TEXT NOT NULL DEFAULT 'idle',
+    kind TEXT NOT NULL DEFAULT 'general',      -- 'general' | 'coding' (task driver)
     plan TEXT NOT NULL DEFAULT '[]',              -- JSON task graph / step list
     working_memory TEXT NOT NULL DEFAULT '[]',    -- JSON list of entries
     alignment TEXT NOT NULL DEFAULT '[]',         -- JSON list of corrections
     pending_input TEXT NOT NULL DEFAULT '[]',     -- JSON messages queued by agent_send
+    pending_action TEXT,                          -- JSON {id, description} approval gate
     tools TEXT NOT NULL DEFAULT '[]',             -- per-agent tool allowlist (JSON)
     schedule TEXT,                                -- cron / interval trigger spec
     budget TEXT NOT NULL DEFAULT '{}',            -- JSON budget: turns/tokens/wall/actions
     budget_used INTEGER NOT NULL DEFAULT 0,
+    last_fired_at TEXT,                           -- last schedule fire (scheduler bookkeeping)
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
@@ -128,6 +134,21 @@ class AgentSessionStore:
         with self._lock:
             self._conn.execute("PRAGMA journal_mode=WAL")
             self._conn.executescript(_SCHEMA)
+            # Migrations for columns added after the first release: the
+            # scheduler's last_fired_at (step 3) and the worker's kind /
+            # pending_action (steps 4-6). Each is a no-op when already present.
+            for column, definition in (
+                ("last_fired_at", "TEXT"),
+                ("kind", "TEXT NOT NULL DEFAULT 'general'"),
+                ("pending_action", "TEXT"),
+            ):
+                try:
+                    self._conn.execute(
+                        f"ALTER TABLE agents ADD COLUMN {column} {definition}"
+                    )
+                    self._conn.commit()
+                except sqlite3.OperationalError:
+                    pass  # column already present
             self._conn.commit()
 
     def close(self) -> None:
@@ -148,6 +169,7 @@ class AgentSessionStore:
         out["pending_input"] = _loads(out.get("pending_input"), [])
         out["tools"] = _loads(out.get("tools"), [])
         out["budget"] = _loads(out.get("budget"), {})
+        out["pending_action"] = _loads(out.get("pending_action"), None)
         return out
 
     def _log(self, agent_id: int, kind: str, detail: str) -> None:
@@ -173,6 +195,7 @@ class AgentSessionStore:
         schedule: Optional[str] = None,
         tools: Optional[list[str]] = None,
         budget: Optional[dict] = None,
+        kind: str = "general",
     ) -> int:
         """
         Create a session in the ``created`` state. Returns its id.
@@ -186,6 +209,8 @@ class AgentSessionStore:
             tools: Per-agent tool allowlist (least authority). Empty = default.
             budget: Dict of ceilings, e.g. ``{"max_turns": 50,
                     "max_wall_minutes": 120, "max_actions_per_day": 100}``.
+            kind: The task driver — ``"general"`` (LLM loop) or ``"coding"``
+                  (the CodingAgent in a git worktree).
         """
         name = (name or "").strip()
         goal = (goal or "").strip()
@@ -197,14 +222,15 @@ class AgentSessionStore:
             raise ValueError("Agent name is too long (max 100 characters).")
         if len(goal) > 8000:
             raise ValueError("Agent goal is too long (max 8000 characters).")
+        kind = (kind or "general").strip()[:20] or "general"
         now = _iso()
         with self._lock:
             try:
                 cur = self._conn.execute(
-                    "INSERT INTO agents (name, goal, state, status, schedule, tools,"
-                    " budget, created_at, updated_at)"
-                    " VALUES (?, ?, 'created', 'idle', ?, ?, ?, ?, ?)",
-                    (name, goal, schedule,
+                    "INSERT INTO agents (name, goal, state, status, kind, schedule,"
+                    " tools, budget, created_at, updated_at)"
+                    " VALUES (?, ?, 'created', 'idle', ?, ?, ?, ?, ?, ?)",
+                    (name, goal, kind, schedule,
                      _dumps(list(tools) if tools else []),
                      _dumps(dict(budget) if budget else {}),
                      now, now),
@@ -320,7 +346,8 @@ class AgentSessionStore:
         for col in columns:
             if col not in (
                 "plan", "working_memory", "alignment", "pending_input",
-                "tools", "schedule", "budget", "status", "goal",
+                "tools", "schedule", "budget", "status", "goal", "last_fired_at",
+                "pending_action", "kind",
             ):
                 raise ValueError(f"Unknown agent field '{col}'.")
         assignments = ", ".join(f"{c} = ?" for c in columns)
@@ -344,6 +371,24 @@ class AgentSessionStore:
     def set_budget(self, agent_id: int, budget: dict) -> None:
         self._update_fields(agent_id, budget=_dumps(dict(budget)))
 
+    def set_last_fired(self, agent_id: int, ts: Optional[float]) -> None:
+        """Record when the scheduler last fired this session's trigger."""
+        self._update_fields(agent_id, last_fired_at=_iso(ts) if ts is not None else None)
+
+    def set_kind(self, agent_id: int, kind: str) -> None:
+        """Set the task driver: 'general' (LLM loop) or 'coding' (CodingAgent)."""
+        self._update_fields(agent_id, kind=(kind or "general").strip()[:20] or "general")
+
+    def set_pending_action(self, agent_id: int, action: Optional[dict]) -> None:
+        """
+        Checkpoint an approval gate the agent parked on (``{id, description}``).
+        Persisted so a crash can't lose the question the human is being asked.
+        """
+        self._update_fields(
+            agent_id,
+            pending_action=_dumps(dict(action)) if action else None,
+        )
+
     def bump_budget_used(self, agent_id: int, amount: int = 1) -> int:
         """Add to the budget-usage counter; returns the new total."""
         with self._lock:
@@ -359,6 +404,31 @@ class AgentSessionStore:
             ).fetchone()
             return int(row["budget_used"])
 
+    _DELTA_FIELDS = frozenset({
+        "plan", "working_memory", "alignment", "tools", "budget",
+        "schedule", "status", "goal", "kind",
+    })
+
+    def apply_state_delta(self, agent_id: int, delta: dict) -> None:
+        """
+        Apply an event's ``state_delta`` atomically before a resume: a dict of
+        session fields to checkpoint. List/dict values are JSON-encoded; unknown
+        fields are rejected; ``None`` values are ignored.
+        """
+        delta = dict(delta or {})
+        bad = [k for k in delta if k not in self._DELTA_FIELDS]
+        if bad:
+            raise ValueError(f"Unknown state_delta fields: {sorted(bad)}")
+        encoded: dict[str, Any] = {}
+        for key, value in delta.items():
+            if value is None:
+                continue
+            if isinstance(value, (list, dict)):
+                encoded[key] = _dumps(value)
+            else:
+                encoded[key] = str(value)
+        if encoded:
+            self._update_fields(agent_id, **encoded)
     # ── Working memory & alignment (the durable stores) ───────────────────────
 
     def append_memory(self, agent_id: int, entry: str) -> int:

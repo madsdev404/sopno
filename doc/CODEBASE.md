@@ -319,12 +319,14 @@ tools.
 (backing store + work queue; design in `doc/roadmap/long-running-agents.md`).
 
 - `session.py` — `AgentSessionStore`, own SQLite DB (`settings.agents_path`,
-  WAL, RLock). `create_session(name, goal, ...)` → durable session with status
-  machine `ready → running → done | failed | cancelled | waiting_human`
-  (`valid_transition` guards every move; illegal transitions raise). Heartbeat
-  updates `last_heartbeat`/`updated_at` (running only). Append-only action log
-  (`log_action`) — the session is a structured event stream, not a chat
-  transcript. Plan/memory alignment budget caps the stored plan+memory size.
+  WAL, RLock). `create(name, goal, kind=...)` → durable session with status
+  machine `ready → running → done | blocked | dead | waiting_human`
+  (`valid_transition` guards every move; illegal transitions raise; `running →
+  ready` returns a session to dormancy mid-job). Heartbeat updates `updated_at`
+  (running only). Append-only action log (`log_action`) — the session is a
+  structured event stream, not a chat transcript. Plan/memory alignment budget
+  caps the stored plan+memory size. `kind` (`general`/`coding`) and
+  `pending_action` (checkpointed approval gate) columns, no-op migrations.
 - `queue.py` — `AgentQueue`, own table in the same SQLite DB. `enqueue` with
   idempotency (a `dedupe_key` collapses repeats); `claim(worker, limit)` claims
   `ready` jobs atomically (`BEGIN IMMEDIATE`, `ORDER BY id ASC`) and stamps a
@@ -332,6 +334,41 @@ tools.
   lease; `recover_orphans()` requeues expired-lease jobs (attempts + 1) or
   dead-letters them past `agents_max_attempts`; failed jobs retry with
   exponential backoff + jitter (`_backoff_seconds`); `stats()` counts by status.
+- `scheduler.py` — `AgentScheduler`: a polled daemon that fires session
+  triggers. `parse_schedule` handles `interval:<seconds>`, `cron:<5 fields>`
+  (stdlib-only parser — `*`/`*/n`/`a-b`/`a,b,c`, 3-letter names, dom/dow OR
+  semantics), and one-shot `eta:<ISO>`; `next_fire_at` computes the next match.
+  `tick()` fires every due trigger as a `run` job (idempotency key tied to the
+  fire timestamp — a crash between enqueue and bookkeeping can't double-run) and
+  checkpoints `last_fired_at` (new column, migrated in `__init__`).
+- `events.py` — `AgentEvents`, the wake channel: `wake(agent_id, message,
+  state_delta)` checkpoints the delta (store's `apply_state_delta`, atomic),
+  queues the message on pending input, enqueues a `resume` job, and appends an
+  audit entry — the event-driven dormancy path for parked sessions.
+- `worker.py` — `AgentWorker`, a daemon that claims `run`/`resume` jobs and
+  drives a bounded ORIENT → DECIDE → ACT → OBSERVE loop. Per-agent lock (one
+  session → one driver) + a shared dispatch lock (serializes the pending-action
+  gate in `files.py`). Heartbeats the session and renews the job lease each
+  step; executes tool calls through the session's allowlist (default excludes
+  the `agent_*` management tools); an approval gate parks the session in
+  `waiting_human` with the pending action checkpointed; queued human input is
+  drained on resume (a parked approval is answered Yes/No). Budgets
+  (`max_turns`/`max_wall_minutes`/`max_actions_per_day`) end in `dead`; the
+  per-job turn budget (`agents_job_max_turns` or `budget.max_turns`) hands the
+  session back to `ready` for dormancy. A `kind='coding'` session is routed
+  into `run_coding_task` (the worktree harness).
+- `runtime.py` — `AgentRuntime`, the lifecycle owner started by the assistant:
+  boots `agents_concurrency` workers + the scheduler + a watchdog, recovers
+  orphan jobs and reclaims stale `running` sessions (no live job + heartbeat
+  older than `agents_lease_seconds`) on start and periodically.
+- `scheduler.py` — `AgentScheduler`: a polled daemon that fires session
+  triggers. `parse_schedule` handles `interval:<seconds>`, `cron:<5 fields>`
+  (stdlib-only parser — `*`/`*/n`/`a-b`/`a,b,c`, 3-letter names, dom/dow OR
+  semantics), and one-shot `eta:<ISO>`; `next_fire_at` computes the next match.
+  `tick()` fires every due trigger as a `run` job (idempotency key tied to the
+  fire timestamp — a crash between enqueue and bookkeeping can't double-run) and
+  checkpoints `last_fired_at` (new column, migrated in `__init__`). Terminal
+  (`done`/`dead`) and paused sessions are skipped.
 
 **`sopno/core/coding/`** — the autonomous coding harness (design in
 `doc/roadmap/autonomous-coding.md`). Split from the original ~844-line
@@ -344,8 +381,11 @@ job" rule.
   each change tool it verifies, and commits a checkpoint on green. Terminal
   states `success | no_op | blocked | stalled | exhausted` (LLM errors land in
   `exhausted`, never `success`). The harness owns `PLAN.md`/`progress.md`/
-  `SUMMARY.md`; injectables `llm_step`/`git_runner`/`verify_runner` make it
-  fully unit-testable.
+  `SUMMARY.md`; injectables `llm_step`/`git_runner`/`verify_runner`/`store`/
+  `session_id` make it fully unit-testable. With a `store` + `session_id`, a
+  `[coding-worktree]` record is persisted in the session's working memory and a
+  later run reattaches to the same branch (`WorktreeSession.attach`) — the
+  background-agent crash-resume path.
 - `tools.py` — `ToolDispatcher`: allowlists `ALLOWED_TOOLS`, filters
   `get_schema()` for `tools_schema()`, and `_gate`'s every write through
   `files._authorize` (bypassing the interactive Yes/No, never the gate).
@@ -574,6 +614,14 @@ job" rule.
 | `rule_set_enabled` | Arm/pause a rule (disabling confirmed) | `rule_id`, `enabled` |
 | `run_subagent` | Delegate to researcher / coder / reviewer | `agent`, `task` |
 | `subagent_list` | List the available subagents | — |
+| `agent_create` | Create a durable background agent session | `name`, `goal`, `schedule`, `tools`, `budget`, `task_type` |
+| `agent_list` | List background agent sessions | — |
+| `agent_status` | Session state, budget usage, activity | `name` |
+| `agent_send` | Wake a session / answer an approval gate | `name`, `message` |
+| `agent_pause` | Cancel queued jobs + mark paused | `name` |
+| `agent_resume` | Clear paused + queue a resume job | `name` |
+| `agent_kill` | Permanently terminate a session (confirmed) | `name` |
+| `agent_log` | Append-only audit trail | `name`, `limit` |
 | `git_status` | Working-tree status + recent history | `repo` |
 | `git_log` | Recent commits, one line each | `repo`, `limit` |
 | `git_diff` | Unstaged or staged diff (capped) | `repo`, `staged` |
@@ -643,7 +691,7 @@ importable as `from sopno.tools.builtins import <name>` aliases):
 - `web/` — internet tools (`browser`, `search`, `network`).
 - `data/` — data tools (`databases`, `packages`).
 - `knowledge/` — knowledge tools (`vision`, `email`, `calendar`, `notes`).
-- `automation/` — proactive tools (`reminders`, `rules`, `subagents`).
+- `automation/` — proactive tools (`reminders`, `rules`, `subagents`, `agents`).
 
 - **`system/system.py`** — OS-level tools.
   - `open_application(app_name)` — launches apps via `subprocess.Popen` using the
@@ -834,6 +882,21 @@ importable as `from sopno.tools.builtins import <name>` aliases):
     focused system prompt and a **restricted** `TOOLS_SCHEMA`; runs the same
     Ollama tool-calling loop as the main assistant and returns plain text.
   - `subagent_list()` — names of the available subagents.
+- **`automation/agents.py`** — durable background agent management, backed by
+  `sopno/core/agents/` (sessions, queue, scheduler, events, worker, runtime).
+  - `agent_create(name, goal, schedule?, tools?, budget?, task_type?)` — create a
+    session (`task_type` = `general` | `coding`) and put it `ready`; validates
+    the schedule spec, tool allowlist, and budget keys.
+  - `agent_list()` / `agent_status(name)` — state, goal, budget usage, recent
+    activity, pending input.
+  - `agent_send(name, message)` — wake a parked/dormant session (the approval
+    channel: "yes" approves, anything else declines).
+  - `agent_pause(name)` — cancel queued jobs + mark paused; `agent_resume(name)`
+    — clear paused + queue a resume job.
+  - `agent_kill(name)` — permanently terminate (confirmation gate); cancels
+    jobs and clears the schedule.
+  - `agent_log(name, limit)` — append-only audit trail (actions, messages,
+    transitions, errors).
 - **`dev/git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -980,7 +1043,7 @@ python3 -m unittest discover -s tests
 | Subpackage / file | What it verifies |
 |------|------------------|
 | `voice/` | Audio stack: `test_tts.py` (`_is_bangla()` + engine routing), `test_stt.py` (Whisper-first, Google fallback only when enabled), `test_wakeword.py` (fallback + lazy detector), `test_barge.py` (interrupt logic) |
-| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py`, `test_agents.py` (session + queue), `test_coding.py` (coding harness loop) |
+| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py`, `test_agents.py` (session + queue), `test_agent_scheduler.py` (triggers + events), `test_agent_worker.py` (worker loop + coding bridge), `test_agent_runtime.py` (lifecycle + reclaim), `test_agent_tools.py` (agent management tools), `test_coding.py` (coding harness loop + resume) |
 | `tools/` | One file per skill: `test_browser.py`, `test_calendar.py`, `test_databases.py`, `test_desktop.py`, `test_email.py`, `test_files.py`, `test_git.py`, `test_manage.py`, `test_network.py`, `test_notes.py`, `test_packages.py`, `test_readers.py`, `test_terminal.py`, `test_vision.py` |
 | `integration/` | Cross-cutting: `test_mcp.py` (client/server), `test_plugins.py` (dynamic loader) |
 | `test_tools.py` | Registry-level checks (all registered tools present, tool output formats, subprocess call wiring) |
@@ -1068,6 +1131,10 @@ All settings live in **`config.json`** at the repo root and are read by
 | `agents_backoff_base` | `5` | Base (s) for failed-job exponential backoff |
 | `agents_backoff_cap` | `3600` | Backoff ceiling (s) |
 | `agents_max_attempts` | `3` | Attempts before a job is dead-lettered |
+| `agents_poll_seconds` | `30` | How often `AgentScheduler` checks triggers |
+| `agents_worker_poll_seconds` | `2` | How often `AgentWorker` polls the queue for jobs |
+| `agents_job_max_turns` | `20` | Per-job agent-loop turns before dormancy |
+| `agents_watchdog_seconds` | `300` | How often `AgentRuntime` reclaims stale sessions |
 | `coding_enabled` | `true` | Master switch for autonomous coding |
 | `coding_worktree_dir` | `sopno/memory/worktrees` | Where coding worktrees live |
 | `coding_max_turns` | `150` | Cap on coding-loop turns |

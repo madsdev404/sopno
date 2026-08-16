@@ -109,6 +109,10 @@ class CodingAgent:
 
     # ── Session/audit hook ────────────────────────────────────────────────────
 
+    # Working-memory marker for the durable coding-worktree record, so a
+    # background session can crash-resume onto the same branch (step 7).
+    _CODING_MARKER = "[coding-worktree]"
+
     def _log_action(self, kind: str, detail: str) -> None:
         if self.store is not None and self.session_id is not None:
             try:
@@ -118,9 +122,41 @@ class CodingAgent:
 
     def _finish_session(self, state: str) -> None:
         if self.store is not None and self.session_id is not None:
+            # ``blocked`` / ``stalled`` stay resumable (the work is on the
+            # branch); only real exhaustion is terminal.
+            target = {
+                "success": "done", "no_op": "done", "blocked": "blocked",
+                "stalled": "blocked", "exhausted": "dead",
+            }.get(state, "dead")
             try:
-                self.store.transition(
-                    self.session_id, "done" if state == "success" else "dead"
+                self.store.transition(self.session_id, target)
+            except Exception:  # noqa: BLE001
+                pass
+
+    def _load_coding_record(self) -> Optional[dict]:
+        """The stored ``{branch, base}`` of a previous run, if any."""
+        if self.store is None or self.session_id is None:
+            return None
+        try:
+            agent = self.store.get(self.session_id)
+        except Exception:  # noqa: BLE001
+            return None
+        for entry in reversed(agent.get("working_memory") or []):
+            text = entry.get("text", "")
+            if text.startswith(self._CODING_MARKER):
+                try:
+                    return json.loads(text[len(self._CODING_MARKER):].strip())
+                except ValueError:
+                    return None
+        return None
+
+    def _save_coding_record(self, branch: str, base_sha: str) -> None:
+        if self.store is not None and self.session_id is not None:
+            try:
+                self.store.append_memory(
+                    self.session_id,
+                    f"{self._CODING_MARKER} "
+                    f"{json.dumps({'branch': branch, 'base': base_sha})}",
                 )
             except Exception:  # noqa: BLE001
                 pass
@@ -171,24 +207,41 @@ class CodingAgent:
         try:
             # ── Setup: worktree + branch on an isolated checkout ────────
             wt = WorktreeSession(self.repo, self.worktree_dir, self.git_runner)
-            branch = wt.make_branch(goal)
-            err = wt.setup(branch)
-            if err:
-                return {"state": "blocked", "reason": err, "branch": branch,
-                        "worktree": str(wt.worktree or ""), "commits": [],
-                        "turns": 0, "changes": 0, "diff_lines": 0, "summary": ""}
+            record = self._load_coding_record()
+            resumed = False
+            branch = ""
+            if record and record.get("branch"):
+                branch = str(record["branch"])
+                if wt.attach(branch, record.get("base")) == "":
+                    resumed = True
+            if not resumed:
+                branch = wt.make_branch(goal)
+                err = wt.setup(branch)
+                if err:
+                    return {"state": "blocked", "reason": err, "branch": branch,
+                            "worktree": str(wt.worktree or ""), "commits": [],
+                            "turns": 0, "changes": 0, "diff_lines": 0, "summary": ""}
             assert wt.worktree is not None
 
             self.worktrees = wt
             self.dispatcher = ToolDispatcher(self.repo, wt.worktree, paths_allowed)
             self.verifier = Verifier(wt.worktree, self.verify_runner, recipe)
+            self._save_coding_record(wt.branch, wt.base_sha)
 
             self._write_plan(goal, spec)
             messages: list[dict] = [
                 {"role": "system", "content": system_prompt(branch, self.repo)},
                 {"role": "user", "content": task_prompt(goal, spec, paths_allowed, recipe)},
             ]
-            self._log_action("transition", f"started run on branch {branch}")
+            if resumed:
+                messages.append({
+                    "role": "user",
+                    "content": "This run resumes an existing branch. Read "
+                               "PLAN.md and progress.md first, then continue "
+                               "the work from the last checkpoint commit.",
+                })
+            self._log_action("transition", f"started run on branch {branch}"
+                             + (" (resumed)" if resumed else ""))
 
             # ── ReAct loop ──────────────────────────────────────────────
             state, reason, turns_without_progress = "blocked", "", 0

@@ -2,10 +2,11 @@
 sopno/tools/builtins/automation
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Proactive behaviour: scheduled reminders (reminders.py), "if X then Y"
-automation rules (rules.py), and delegated subagent runners (subagents.py).
+automation rules (rules.py), durable background agents (agents.py), and
+delegated subagent runners (subagents.py).
 """
 
-from . import reminders, rules, subagents  # noqa: F401
+from . import reminders, rules, agents, subagents  # noqa: F401
 
 
 def _reexport(*modules):
@@ -18,5 +19,5 @@ def _reexport(*modules):
             namespace.setdefault(name, value)
 
 
-_reexport(reminders, rules, subagents)
+_reexport(reminders, rules, agents, subagents)
 del _reexport

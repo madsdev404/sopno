@@ -822,11 +822,10 @@ Autonomous coding
 
 Long-running background agents
 
-> **Design docs exist for the first two.** See
-> [autonomous-coding.md](./autonomous-coding.md) and
-> [long-running-agents.md](./long-running-agents.md) for research-backed,
-> implementation-ready designs (loop anatomy, verification ladder, durable
-> session/queue architecture, safety, and rollout plans).
+> **Implemented.** See [autonomous-coding.md](./autonomous-coding.md) and
+> [long-running-agents.md](./long-running-agents.md) for the research-backed,
+> implemented designs (loop anatomy, verification ladder, durable session/queue
+> architecture, safety, rollout, and status).
 
 Research agent
 
