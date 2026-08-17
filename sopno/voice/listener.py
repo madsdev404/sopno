@@ -188,9 +188,14 @@ class Listener:
             self.log(f"Turn captured (~{duration:.1f}s @ {audio.sample_rate} Hz).")
             return audio
         except sr.WaitTimeoutError:
-            # Threshold was probably too high — re-clamp and try next turn.
-            self.log("Wait timed out — threshold may be too high. Re-clamping.")
-            self._clamp_energy()
+            # No speech detected — threshold is probably too high.
+            # Halve it so the next attempt is more sensitive, then retry.
+            old = float(self.recognizer.energy_threshold)
+            new = max(float(settings.energy_threshold_floor), old * 0.5)
+            self.recognizer.energy_threshold = new
+            self.log(
+                f"No speech detected — lowering threshold: {old:.0f} → {new:.0f}"
+            )
             return None
         except Exception as e:
             self.log(f"Classic listen failed: {e}")

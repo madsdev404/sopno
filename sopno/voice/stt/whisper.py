@@ -19,6 +19,8 @@ from sopno.voice.stt.scoring import (
     _audio_is_too_short,
     _is_too_thin,
     _score_result,
+    _RETRY_SCORE,
+    _MIN_ACCEPT_SCORE,
 )
 
 # Quiet HF Hub noise; we prefer local files

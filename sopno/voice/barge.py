@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import audioop
 import threading
+import time
 from typing import Callable, Optional
 
 from sopno.config.settings import settings
@@ -185,20 +186,29 @@ class BargeInMonitor:
 
         pa = None
         stream = None
-        try:
-            pa = pyaudio.PyAudio()
-            stream, rate = self._open_stream(pa)
-            with self._stream_lock:
-                self._pa = pa
-                self._stream = stream
-        except Exception as e:
-            self.log(f"Mic unavailable — barge-in disabled ({e}).")
+        # On PulseAudio, the mic may not be immediately available after the
+        # listener releases it.  Retry a few times with short delays.
+        for attempt in range(4):
             try:
-                if pa is not None:
-                    pa.terminate()
-            except Exception:
-                pass
-            return
+                pa = pyaudio.PyAudio()
+                stream, rate = self._open_stream(pa)
+                with self._stream_lock:
+                    self._pa = pa
+                    self._stream = stream
+                break
+            except Exception as e:
+                try:
+                    if pa is not None:
+                        pa.terminate()
+                except Exception:
+                    pass
+                pa = None
+                stream = None
+                if attempt < 3:
+                    time.sleep(0.3 * (attempt + 1))
+                    continue
+                self.log(f"Mic unavailable — barge-in disabled ({e}).")
+                return
 
         frames_per_sec = rate / float(1024)
         detector = BargeDetector(
