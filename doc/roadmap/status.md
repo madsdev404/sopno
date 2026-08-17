@@ -5,10 +5,10 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📊 Status Summary
-* **Current Phase:** Complete — all 10 roadmap features implemented
-* **Latest Completed Upgrade:** Coding harness rollout (approval modes, sub-agent escalation, guardrailed auto-merge) + event sources / REFLECT for background agents
+* **Current Phase:** Complete — all roadmap features implemented
+* **Latest Completed Upgrade:** Long-running agents + autonomous coding fully rolled out (Steps 1–7) including budget/watchdog hardening and crash-resume
 * **Housekeeping:** Builtin tools and tests reorganized into categorized subpackages (`df047e7`)
-* **New Phase:** Long-running agents + autonomous coding — durable agent machinery and the coding loop (see `long-running-agents.md`, `autonomous-coding.md`)
+* **Test suite:** 620 tests, all passing
 
 ---
 
@@ -135,6 +135,10 @@ This document tracks the incremental progress of transforming **Sopno (স্ব
 ---
 
 ## 📓 Technical Progress Log
+
+### [August 18, 2026] — Step 27: Budget/Watchdog Hardening + Crash-Resume (closes Step 6)
+* **Modified Files:** `tests/core/test_agent_worker.py`, `tests/core/test_coding.py`, `tests/core/test_agent_runtime.py`, `sopno/core/agents/runtime.py`
+* **Impact:** Closes rollout step 6 of both `long-running-agents.md` and `autonomous-coding.md`. **Worker budget tests:** `WallClockBudgetTest` (wall-clock budget exhausts session to `dead`), `DailyBudgetTest` (actions-per-day budget exhausts session to `dead`). **Capability profile test:** `CapabilityTest.test_tool_not_in_allowlist_is_refused` — explicit per-agent tool allowlist enforcement. **Watchdog tests:** `WatchdogTest` — 3 tests verifying the watchdog thread starts, reclaims stale running sessions on its interval, and the full runtime start/stop lifecycle. **Crash-resume test:** `test_crash_resume_picks_up_from_last_checkpoint` — mid-run LLM failure, resume from last checkpoint commit, both pre-crash and post-crash files survive. **Runtime cleanup:** `stop()` now joins the watchdog thread instead of dropping the reference. 7 new tests → suite at 620.
 
 ### [August 17, 2026] — Step 26: Coding Approval Modes + Escalation + Auto-Merge + Event Sources/REFLECT
 * **Added Files:** `sopno/tools/builtins/automation/coding.py`, `sopno/core/agents/sources.py`, `tests/core/test_agent_sources.py`
