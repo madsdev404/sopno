@@ -101,8 +101,10 @@ class BargeInMonitor:
         if monitor.interrupted: ...              # the user barged in
     """
 
-    def __init__(self, log_callback: Optional[Callable[[str], None]] = None) -> None:
+    def __init__(self, log_callback: Optional[Callable[[str], None]] = None,
+                 listener=None) -> None:
         self.log = log_callback or (lambda m: print(f"[Barge] {m}"))
+        self._listener = listener  # shared mic source
         self._thread: Optional[threading.Thread] = None
         self._stop = threading.Event()
         self._measuring = threading.Event()
@@ -178,6 +180,21 @@ class BargeInMonitor:
         raise RuntimeError("Could not open microphone input stream.")
 
     def _run(self) -> None:
+        # Try shared mic from listener first (PulseAudio-friendly).
+        if self._listener is not None:
+            stream, rate = self._listener.open_shared_mic()
+            if stream is not None:
+                with self._stream_lock:
+                    self._stream = stream
+                try:
+                    self._run_loop(stream, rate)
+                finally:
+                    self._listener.close_shared_mic()
+                    with self._stream_lock:
+                        self._stream = None
+                return
+
+        # Fallback: open our own mic (works on ALSA, fails on PulseAudio).
         try:
             import pyaudio
         except ImportError:
@@ -186,8 +203,7 @@ class BargeInMonitor:
 
         pa = None
         stream = None
-        # On PulseAudio, the mic may not be immediately available after the
-        # listener releases it.  Retry a few times with short delays.
+        time.sleep(0.5)
         for attempt in range(4):
             try:
                 pa = pyaudio.PyAudio()
@@ -205,11 +221,29 @@ class BargeInMonitor:
                 pa = None
                 stream = None
                 if attempt < 3:
-                    time.sleep(0.3 * (attempt + 1))
+                    time.sleep(0.5 * (attempt + 1))
                     continue
                 self.log(f"Mic unavailable — barge-in disabled ({e}).")
                 return
 
+        try:
+            self._run_loop(stream, rate)
+        finally:
+            with self._stream_lock:
+                self._stream = None
+                self._pa = None
+            try:
+                stream.stop_stream()
+                stream.close()
+            except Exception:
+                pass
+            try:
+                pa.terminate()
+            except Exception:
+                pass
+
+    def _run_loop(self, stream, rate: int) -> None:
+        """Core barge-in detection loop — reads from the given stream."""
         frames_per_sec = rate / float(1024)
         detector = BargeDetector(
             floor=self._floor,
@@ -232,15 +266,8 @@ class BargeInMonitor:
                     self._interrupt.set()
                     break
         finally:
-            with self._stream_lock:
-                self._stream = None
-                self._pa = None
             try:
                 stream.stop_stream()
                 stream.close()
-            except Exception:
-                pass
-            try:
-                pa.terminate()
             except Exception:
                 pass

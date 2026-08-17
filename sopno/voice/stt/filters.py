@@ -67,7 +67,8 @@ def _is_babble(text: str) -> bool:
 
 
 def _has_bangla(text: str) -> bool:
-    return bool(re.search(r"[\u0980-\u09FF]", text or ""))
+    """Detect Bengali (\u0980-\u09FF) or Devanagari (\u0900-\u097F) script."""
+    return bool(re.search(r"[\u0900-\u09FF]", text or ""))
 
 
 def _has_latin(text: str) -> bool:

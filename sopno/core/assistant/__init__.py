@@ -233,7 +233,7 @@ class SopnoAssistant:
             speak(text)
             return False
 
-        monitor = BargeInMonitor(log_callback=self.on_log_message)
+        monitor = BargeInMonitor(log_callback=self.on_log_message, listener=self.listener)
         monitor.start()
         try:
             speak(

@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import audioop
 import sys
+import threading
 import time
 from typing import Callable, Optional
 
@@ -58,6 +59,12 @@ class Listener:
         self.recognizer.non_speaking_duration = min(0.5, settings.pause_threshold * 0.4)
         self.turn_taker = TurnTaker(log_callback=self.log)
         self._mic: Optional[sr.Microphone] = None
+        # Shared PyAudio for barge-in — avoids opening a second mic stream
+        # which fails on PulseAudio (only one client per device allowed).
+        self._shared_pa = None
+        self._shared_stream = None
+        self._shared_rate: int = 0
+        self._shared_lock = threading.Lock()
 
     def _clamp_energy(self) -> None:
         """Keep threshold low enough that normal speech always starts a phrase."""
@@ -84,6 +91,62 @@ class Listener:
                 f"(sample_rate={self._mic.SAMPLE_RATE} Hz, width={self._mic.SAMPLE_WIDTH})."
             )
         return self._mic
+
+    def open_shared_mic(self):
+        """Open a PyAudio mic stream for barge-in to share.
+
+        Returns (pyaudio_stream, sample_rate) or (None, 0) on failure.
+        The caller must call close_shared_mic() when done.
+        """
+        import pyaudio
+
+        with self._shared_lock:
+            if self._shared_stream is not None:
+                return self._shared_stream, self._shared_rate
+            try:
+                pa = pyaudio.PyAudio()
+                info = pa.get_default_input_device_info()
+                device_index = int(info["index"])
+                native = int(info.get("defaultSampleRate") or 44100)
+                for rate in (native, 44100, 48000, 16000):
+                    try:
+                        stream = pa.open(
+                            format=pa.paInt16,
+                            channels=1,
+                            rate=rate,
+                            input=True,
+                            input_device_index=device_index,
+                            frames_per_buffer=1024,
+                        )
+                        self._shared_pa = pa
+                        self._shared_stream = stream
+                        self._shared_rate = rate
+                        self.log(f"Shared mic opened for barge-in ({rate} Hz).")
+                        return stream, rate
+                    except Exception:
+                        continue
+                pa.terminate()
+            except Exception as e:
+                self.log(f"Shared mic open failed: {e}")
+            return None, 0
+
+    def close_shared_mic(self) -> None:
+        """Close the shared PyAudio mic stream."""
+        with self._shared_lock:
+            try:
+                if self._shared_stream is not None:
+                    self._shared_stream.stop_stream()
+                    self._shared_stream.close()
+            except Exception:
+                pass
+            try:
+                if self._shared_pa is not None:
+                    self._shared_pa.terminate()
+            except Exception:
+                pass
+            self._shared_stream = None
+            self._shared_pa = None
+            self._shared_rate = 0
 
     def calibrate(self, duration: float = 0.8) -> None:
         """Light ambient calibration, then clamp — heavy cal made the mic deaf."""
@@ -145,7 +208,6 @@ class Listener:
         if running_check is not None and not running_check():
             return None
 
-        self._clamp_energy()
         need = float(self.recognizer.energy_threshold)
         self.log(
             "Capture mode: classic mic (device-native rate) "
@@ -189,9 +251,9 @@ class Listener:
             return audio
         except sr.WaitTimeoutError:
             # No speech detected — threshold is probably too high.
-            # Halve it so the next attempt is more sensitive, then retry.
+            # Halve it (ignoring the floor) so the next attempt is more sensitive.
             old = float(self.recognizer.energy_threshold)
-            new = max(float(settings.energy_threshold_floor), old * 0.5)
+            new = old * 0.5
             self.recognizer.energy_threshold = new
             self.log(
                 f"No speech detected — lowering threshold: {old:.0f} → {new:.0f}"

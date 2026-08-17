@@ -6,6 +6,7 @@ faster-whisper model loading and offline transcription.
 
 import concurrent.futures
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Optional
@@ -133,6 +134,14 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
         )
 
         def _run(lang: Optional[str]):
+            # initial_prompt biases Whisper towards Bengali script when the
+            # language is ambiguous — prevents Hindi/Devanagari hallucinations.
+            prompt = (
+                "হ্যালো, আমি বাংলায় কথা বলছি। "
+                "তুমি কি করতে পারো? আমাকে সাহায্য করো।"
+                if lang != "en"
+                else None
+            )
             segments_gen, info = model.transcribe(
                 tmp_path,
                 language=lang,  # None = Whisper auto-detect
@@ -148,6 +157,7 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
                 without_timestamps=True,
                 no_speech_threshold=0.6,
                 compression_ratio_threshold=2.2,
+                initial_prompt=prompt,
             )
             segments = list(segments_gen)
             text = " ".join(seg.text for seg in segments).strip()
@@ -179,11 +189,16 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
             )
 
             # 2) Retry only when auto is junk, unsupported lang, or truly weak
+            # Also retry when auto-detected English looks suspicious — Whisper
+            # often misidentifies Bangla as English, especially with accents.
+            has_devanagari = bool(re.search(r"[\u0900-\u097F]", text))
             need_retry = (
                 score <= -900
                 or not _is_supported_utterance(text)
                 or detected not in ("en", "bn")
                 or (score < _RETRY_SCORE and prob < 0.55)
+                or (detected == "en" and has_devanagari)  # Hindi masquerading as English
+                or (detected == "en" and prob < 0.6)      # weak English confidence
             )
             if need_retry:
                 # Prefer the other Sopno language; if auto was ar/etc., try both
