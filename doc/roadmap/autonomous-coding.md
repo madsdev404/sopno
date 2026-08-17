@@ -10,10 +10,16 @@ harness (the machinery around the LLM) is the deliverable, not the prompt.
 > single-purpose package `agent`/`tools`/`worktree`/`verify`/`prompts`/`util`)
 > runs a plan→recite→act→verify loop in a git worktree with gated writes,
 > checkpoint commits, harness-owned docs, and terminal states
-> `success | no_op | blocked | stalled | exhausted`. Config under `coding_*`.
-> Scheduler wiring into the daemon and the `run_coding_task` entry point remain.
-> Related: [long-running-agents.md](./long-running-agents.md) (how a coding run
-> survives across sessions); [features.md](./features.md) §41 lists this under
+> `success | no_op | blocked | stalled | exhausted`. On top of the core loop
+> the full harness is wired: red-test baselines (`coding_require_red_test`),
+> approval modes (`coding_approval_mode`: `auto_merge_guardrailed` /
+> `unattended` / `review_required`), sub-agent escalation (`delegate`,
+> `escalate`, `run_review`), and guardrailed auto-merge into main (re-verify
+> the merged tree, roll back on red) with optional push (`coding_push_enabled`),
+> plus `run_coding_batch` for ticket queues. The coding tools
+> (`coding_run`/`coding_status`) and daemon scheduling make it a background
+> agent task (see [long-running-agents.md](./long-running-agents.md));
+> [features.md](./features.md) §41 lists the original scope under
 > "Future Features".
 
 ---
@@ -316,13 +322,13 @@ coding_require_red_test: true
 
 | Step | Deliverable | Verification |
 |------|-------------|--------------|
-| 1 | `CodingAgent` loop with **plan file + worktree + commits** on a trivial task ("add docstring to X", "write test for Y") | Manual run; branch appears with 1–3 commits |
-| 2 | **Verification recipe + red/green cadence** (run recipe after each change) | Unit tests for `_verify` on fixtures |
-| 3 | **Terminal-state machine + budgets + stagnation detector** | Unit tests for every state transition |
-| 4 | **Escalation gates** (pending-action) + `run_coding_task`/`coding_status` tools + schemas | Tool tests; approval flow works in CLI + HUD |
-| 5 | **Sub-agent delegation** (worker for noisy reads, `reviewer` for level-4) | Tests that delegation returns digests only |
+| 1 ✅ | `CodingAgent` loop with **plan file + worktree + commits** on a trivial task ("add docstring to X", "write test for Y") | Manual run; branch appears with 1–3 commits |
+| 2 ✅ | **Verification recipe + red/green cadence** (run recipe after each change) | Unit tests for `_verify` on fixtures |
+| 3 ✅ | **Terminal-state machine + budgets + stagnation detector** | Unit tests for every state transition |
+| 4 ✅ | **Escalation gates** (pending-action) + `coding_run`/`coding_status` tools + schemas | Tool tests; approval flow works in CLI + HUD |
+| 5 ✅ | **Sub-agent delegation** (`delegate`, `escalate`, `run_review`) | Tests that delegation returns digests only; review gates success |
 | 6 | **Resume across sessions** (durable session store, §4.5) | Crash-resume test: kill mid-run, resume from last commit |
-| 7 | **Guardrailed auto-merge + unattended batch mode** | Full-suite + smoke runs green on this repo's own tests |
+| 7 ✅ | **Guardrailed auto-merge + unattended batch mode** (`run_coding_batch`) | Full-suite + smoke runs green on this repo's own tests |
 
 Each step keeps the suite green and adds tests (unittest, per repo convention).
 Eval targets after step 3+: **real tickets from this repo's own backlog**, with

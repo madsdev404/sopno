@@ -206,6 +206,43 @@ class WorkerLoopTest(WorkerSetup):
         self.assertEqual(self.store.get(agent_id)["budget_used"], 4)
 
 
+class ReflectTest(WorkerSetup):
+    def test_reflect_appends_alignment_notes_after_run(self) -> None:
+        agent_id = self._ready(name="reflector", goal="g")
+        self._run_job(agent_id)
+
+        def reflect_fn(agent):
+            return "always run tests first\n- drop stray bullets\n- another note"
+
+        self._worker(llm_step=_done_llm(), reflect_fn=reflect_fn).tick()
+        alignment = self.store.get(agent_id)["alignment"]
+        self.assertEqual(
+            [a["text"] for a in alignment],
+            ["always run tests first", "drop stray bullets", "another note"],
+        )
+        log = " ".join(e["detail"] for e in self.store.action_log(agent_id))
+        self.assertIn("reflected 3 alignment note(s)", log)
+
+    def test_no_reflect_without_a_fn(self) -> None:
+        agent_id = self._ready(name="plain", goal="g")
+        self._run_job(agent_id)
+        self._worker(llm_step=_done_llm()).tick()
+        self.assertEqual(self.store.get(agent_id)["alignment"], [])
+
+    def test_reflect_failure_is_silent(self) -> None:
+        agent_id = self._ready(name="silent", goal="g")
+        self._run_job(agent_id)
+
+        def boom(agent):
+            raise RuntimeError("model down")
+
+        worker = self._worker(llm_step=_done_llm(), reflect_fn=boom)
+        worker.tick()
+        # The run still finished cleanly; reflection just didn't happen.
+        self.assertEqual(self.store.get(agent_id)["state"], "done")
+        self.assertEqual(self.store.get(agent_id)["alignment"], [])
+
+
 # ── Coding bridge ────────────────────────────────────────────────────────────
 
 
@@ -243,6 +280,36 @@ class CodingBridgeTest(WorkerSetup):
 # ── Capability profile ───────────────────────────────────────────────────────
 
 
+class WallClockBudgetTest(WorkerSetup):
+    def test_wall_clock_budget_kills_session(self) -> None:
+        agent_id = self._ready(name="wcb", goal="g", budget={"max_wall_minutes": 1})
+        # Backdate created_at so the 1-minute wall-clock budget is already spent.
+        self.store._conn.execute(
+            "UPDATE agents SET created_at = ? WHERE id = ?",
+            (time.strftime("%Y-%m-%d %H:%M:%S",
+                           time.gmtime(time.time() - 120)), agent_id),
+        )
+        self.store._conn.commit()
+        job_id = self._run_job(agent_id)
+        self._worker(llm_step=_done_llm()).tick()
+        self.assertEqual(self.store.get(agent_id)["state"], "dead")
+        log = " ".join(e["detail"] for e in self.store.action_log(agent_id))
+        self.assertIn("wall-clock budget", log)
+
+
+class DailyBudgetTest(WorkerSetup):
+    def test_actions_per_day_budget_kills_session(self) -> None:
+        agent_id = self._ready(name="dpb", goal="g",
+                               budget={"max_actions_per_day": 1})
+        # Pre-seed one recent action so the next loop step hits the cap.
+        self.store.log_action(agent_id, "action", "prior work")
+        job_id = self._run_job(agent_id)
+        self._worker(llm_step=_done_llm()).tick()
+        self.assertEqual(self.store.get(agent_id)["state"], "dead")
+        log = " ".join(e["detail"] for e in self.store.action_log(agent_id))
+        self.assertIn("actions-per-day budget", log)
+
+
 class CapabilityTest(WorkerSetup):
     def test_default_allowlist_excludes_management_tools(self) -> None:
         worker = self._worker()
@@ -254,6 +321,19 @@ class CapabilityTest(WorkerSetup):
         worker = self._worker()
         allowed = worker._tools_for({"tools": ["read_file"]})
         self.assertEqual(allowed, frozenset({"read_file"}))
+
+    def test_tool_not_in_allowlist_is_refused(self) -> None:
+        agent_id = self._ready(name="cap", goal="g",
+                               tools=["get_current_time"])
+        self._run_job(agent_id)
+
+        def llm(messages, tools):
+            return {"content": "", "tool_calls": _tool_call("edit_file")}
+
+        self._worker(llm_step=llm).tick()
+        agent = self.store.get(agent_id)
+        log = " ".join(e["detail"] for e in self.store.action_log(agent_id))
+        self.assertIn("not in this agent's allowlist", log)
 
 
 if __name__ == "__main__":

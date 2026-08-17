@@ -33,6 +33,7 @@ class WorktreeSession:
         self.branch = ""
         self.base_sha = ""
         self.commits: list[str] = []
+        self._pre_merge_sha: Optional[str] = None
 
     # ── Branch naming ─────────────────────────────────────────────────────────
 
@@ -120,6 +121,48 @@ class WorktreeSession:
                 if token.isdigit():
                     total += int(token)
         return total
+
+    # ── Merge (step 7, auto_merge_guardrailed only) ─────────────────────────
+
+    def merge_back(self) -> tuple[Optional[str], str]:
+        """
+        Merge the branch into the main checkout (--no-ff). The branch stays
+        around so the run can be audited or reverted later. Returns
+        ``(merged_sha_or_None, error_string_or_'')``.
+        """
+        assert self.worktree is not None
+        self._pre_merge_sha = self.head()
+        res = self.git_runner(f"merge --no-ff --no-edit {q(self.branch)}",
+                              str(self.repo))
+        if res.get("exit_code") not in (0, None):
+            self.abort_merge()
+            return None, (f"auto-merge failed: "
+                          f"{res.get('error') or (res.get('stdout') or '')[:300]}")
+        # The pre-merge head is kept so the caller can roll the committed merge
+        # back if its post-merge verification (or push) fails.
+        sha = self.git_runner("rev-parse HEAD", str(self.repo))
+        merged = (sha.get("stdout") or "").strip()
+        return merged, ""
+
+    def abort_merge(self) -> None:
+        """
+        Undo a merge: an in-progress merge is aborted; an already-committed
+        merge is hard-reset to the pre-merge head. The branch is untouched.
+        """
+        if self._pre_merge_sha:
+            self.git_runner(f"reset --hard {q(self._pre_merge_sha)}",
+                            str(self.repo))
+            self._pre_merge_sha = None
+        else:
+            self.git_runner("merge --abort", str(self.repo))
+
+    def push(self) -> str:
+        """Push the merged main branch to its remote; error string or ''."""
+        res = self.git_runner("push", str(self.repo))
+        if res.get("exit_code") not in (0, None):
+            return (f"push failed: "
+                    f"{res.get('error') or (res.get('stdout') or '')[:300]}")
+        return ""
 
     # ── Harness-owned docs (the agent cannot touch these) ────────────────────
 

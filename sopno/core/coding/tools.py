@@ -53,16 +53,62 @@ CHANGE_TOOLS = frozenset({
 
 TERMINAL_TOOLS = frozenset({"run_terminal", "terminal_send"})
 
+# Coding-only tools (rolled out in autonomous-coding.md steps 4–5): they exist
+# only inside a coding run and are handled by the agent loop (escalate /
+# run_review) or the dispatcher (delegate), never by the main assistant schema.
+LOCAL_TOOLS = ("delegate", "run_review", "escalate")
+
 # Tool schema allowlist (least authority) — same names as the builtin tools.
 ALLOWED_TOOLS = tuple(READ_TOOLS) + (
     "write_file", "edit_file", "delete_file", "rename_file", "copy_file",
     "move_file", "run_terminal", "terminal_send",
-)
+) + LOCAL_TOOLS
+
+# Local JSON schemas for the coding-only tools.
+_LOCAL_SCHEMAS = [
+    {"type": "function", "function": {
+        "name": "delegate",
+        "description": "Delegate a noisy or expensive read task to a focused "
+                       "sub-agent (researcher or coder) and get back only its "
+                       "digest. Use for large searches, long log dumps, or "
+                       "bulk investigations you would rather not do inline.",
+        "parameters": {"type": "object", "properties": {
+            "agent": {"type": "string", "enum": ["researcher", "coder"],
+                      "description": "Which sub-agent."},
+            "task": {"type": "string",
+                     "description": "What to investigate, with paths."},
+        }, "required": ["agent", "task"]},
+    }},
+    {"type": "function", "function": {
+        "name": "run_review",
+        "description": "Ask the reviewer sub-agent (a different role, read-only) "
+                       "to judge the current branch diff. It returns APPROVED "
+                       "or BLOCKED with reasons. Run it before finishing when "
+                       "the ticket implies design or safety stakes.",
+        "parameters": {"type": "object", "properties": {},
+                       "required": []},
+    }},
+    {"type": "function", "function": {
+        "name": "escalate",
+        "description": "Stop and ask a human a question. Use when blocked by "
+                       "ambiguity, missing information, or a decision you must "
+                       "not make alone. In unattended runs the question is "
+                       "recorded and the run continues without you.",
+        "parameters": {"type": "object", "properties": {
+            "reason": {"type": "string", "description": "Why you are stopping."},
+            "question": {"type": "string",
+                         "description": "The specific question for the human."},
+        }, "required": ["reason", "question"]},
+    }},
+]
 
 
 def tools_schema() -> list:
     """The JSON tool schemas the agent may call, filtered to the allowlist."""
-    return [t for t in get_schema() if t["function"]["name"] in ALLOWED_TOOLS]
+    names = frozenset(ALLOWED_TOOLS)
+    builtin = [t for t in get_schema() if t["function"]["name"] in names]
+    return builtin + [s for s in _LOCAL_SCHEMAS
+                      if s["function"]["name"] in names]
 
 
 class ToolDispatcher:
@@ -77,10 +123,17 @@ class ToolDispatcher:
         repo: Path,
         worktree: Path,
         paths_allowed: Optional[list[str]] = None,
+        delegate_fn: Optional[Callable[[str, str], str]] = None,
     ) -> None:
         self.repo = Path(repo)
         self.worktree = Path(worktree)
         self.paths_allowed = [str(p) for p in (paths_allowed or [])]
+        self.delegate_fn = delegate_fn or self._default_delegate
+
+    def _default_delegate(self, agent: str, task: str) -> str:
+        from sopno.core.subagents import run_subagent
+        out = run_subagent(agent, task)
+        return (out or "")[:2000]
 
     # ── Gates ────────────────────────────────────────────────────────────────
 
@@ -305,6 +358,12 @@ class ToolDispatcher:
                 return str(READ_TOOLS[name](args))
             except Exception as e:  # noqa: BLE001
                 return f"Tool error ({name}): {e}"
+        if name == "delegate":
+            try:
+                return self.delegate_fn(args.get("agent", ""),
+                                        args.get("task", ""))
+            except Exception as e:  # noqa: BLE001
+                return f"delegate failed: {e}"
         if name == "write_file":
             return self._write(args.get("path", ""), args.get("content", ""))
         if name == "edit_file":

@@ -30,7 +30,7 @@ def _mask(key: str, value) -> str:
 
 
 class DashboardPanel(QTabWidget):
-    """Five read-only tabs backed directly by the live config/state objects."""
+    """Six read-only tabs backed directly by the live config/state objects."""
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -39,6 +39,7 @@ class DashboardPanel(QTabWidget):
 
         self._settings_tab = self._build_tab("Settings")
         self._memory_tab = self._build_tab("Memory")
+        self._agents_tab = self._build_tab("Agents")
         self._tools_tab = self._build_tab("Tools")
         self._logs_tab = self._build_tab("Logs")
         self._models_tab = self._build_tab("Models")
@@ -46,6 +47,7 @@ class DashboardPanel(QTabWidget):
 
         self.addTab(self._settings_tab, "Settings")
         self.addTab(self._memory_tab, "Memory")
+        self.addTab(self._agents_tab, "Agents")
         self.addTab(self._tools_tab, "Tools")
         self.addTab(self._logs_tab, "Logs")
         self.addTab(self._models_tab, "Models")
@@ -87,6 +89,7 @@ class DashboardPanel(QTabWidget):
         """Re-read the live sources for the static tabs."""
         self._settings_tab.setPlainText(self._settings_text())
         self._memory_tab.setPlainText(self._memory_text())
+        self._agents_tab.setPlainText(self._agents_text())
         self._tools_tab.setPlainText(self._tools_text())
         self._models_tab.setPlainText(self._models_text())
 
@@ -136,6 +139,42 @@ class DashboardPanel(QTabWidget):
                 store.close()
             except Exception:  # noqa: BLE001
                 pass
+
+    def _agents_text(self) -> str:
+        try:
+            from sopno.core.agents.session import get_store
+            from sopno.core.agents.worker import get_workers
+            from sopno.tools.builtins.automation.coding import _coding_record
+
+            agents = get_store().list()
+            workers = get_workers()
+        except Exception as e:  # noqa: BLE001
+            return f"Agent store unavailable: {e}"
+        lines = [f"# {len(workers)} worker(s), {len(agents)} agent(s)\n"]
+        if not agents:
+            lines.append("(no background agents — try agent_create or coding_run)")
+        for agent in agents:
+            record = _coding_record(agent)
+            branch = f" | branch {record.get('branch', '')}" if record else ""
+            budget = agent.get("budget") or {}
+            budget_txt = ", ".join(f"{k}={v}" for k, v in budget.items()) or "default"
+            lines.append(
+                f"[{agent['state']}/{agent['status']}] "
+                f"#{agent['id']} {agent['name']} "
+                f"({agent.get('kind', 'general')}){branch}"
+            )
+            lines.append(f"  goal: {agent['goal'][:160]}")
+            lines.append(
+                f"  budget: {budget_txt} | used {agent['budget_used']} turns | "
+                f"memory {len(agent.get('working_memory') or [])} entries"
+            )
+            if agent.get("pending_action"):
+                lines.append(
+                    "  pending approval: "
+                    f"{(agent['pending_action'].get('description') or '?')[:120]}"
+                )
+            lines.append("")
+        return "\n".join(lines).rstrip()
 
     def _tools_text(self) -> str:
         try:

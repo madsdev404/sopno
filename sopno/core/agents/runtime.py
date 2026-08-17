@@ -29,7 +29,9 @@ from sopno.config.settings import settings
 from sopno.core.agents.queue import AgentQueue, get_queue
 from sopno.core.agents.scheduler import AgentScheduler
 from sopno.core.agents.session import AgentSessionStore, get_store
-from sopno.core.agents.worker import AgentWorker, set_workers
+from sopno.core.agents.sources import (FileWatcher, WebhookServer,
+                                       set_watcher, set_webhook)
+from sopno.core.agents.worker import AgentWorker, default_reflect, set_workers
 
 
 def _parse_iso(raw: Optional[str]) -> Optional[float]:
@@ -66,6 +68,8 @@ class AgentRuntime:
         self._workers: list[AgentWorker] = []
         self._scheduler: Optional[AgentScheduler] = None
         self._watchdog: Optional[threading.Thread] = None
+        self._watcher: Optional[FileWatcher] = None
+        self._webhook: Optional[WebhookServer] = None
         self._stop = threading.Event()
         self._lock = threading.RLock()
 
@@ -91,7 +95,8 @@ class AgentRuntime:
             self._workers = [
                 AgentWorker(self.store, self.queue,
                             worker_id=f"w{i}",
-                            run_check=lambda: self._alive())
+                            run_check=lambda: self._alive(),
+                            reflect_fn=default_reflect)
                 for i in range(self.concurrency)
             ]
             for worker in self._workers:
@@ -109,6 +114,26 @@ class AgentRuntime:
             )
             self._watchdog.start()
 
+            # Step 7: event sources — the file watcher and the webhook receiver
+            # are optional, enabled by their config values.
+            self._start_sources()
+
+    def _start_sources(self) -> None:
+        try:
+            if settings.agents_file_watches:
+                self._watcher = FileWatcher(self.store, self.queue)
+                self._watcher.start()
+                set_watcher(self._watcher)
+        except Exception:  # noqa: BLE001
+            pass
+        try:
+            if int(settings.agents_webhook_port):
+                self._webhook = WebhookServer(self.store, self.queue)
+                self._webhook.start()
+                set_webhook(self._webhook)
+        except Exception:  # noqa: BLE001
+            pass
+
     def stop(self) -> None:
         """Stop workers, scheduler and watchdog; the store stays open for tools."""
         with self._lock:
@@ -121,7 +146,18 @@ class AgentRuntime:
             if self._scheduler is not None:
                 self._scheduler = None
             if self._watchdog is not None:
+                wd = self._watchdog
                 self._watchdog = None
+                if wd.is_alive():
+                    wd.join(timeout=5)
+            if self._watcher is not None:
+                self._watcher.stop()
+                self._watcher = None
+                set_watcher(None)
+            if self._webhook is not None:
+                self._webhook.stop()
+                self._webhook = None
+                set_webhook(None)
 
     def _alive(self) -> bool:
         return not self._stop.is_set() and self.run_check()

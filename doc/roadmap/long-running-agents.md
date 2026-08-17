@@ -7,16 +7,22 @@ user service, HUD on login), so this turns that daemon from a passive listener
 into a host for persistent worker agents.
 
 > Status: **implemented.** `AgentSessionStore` (durable sessions, status
-> machine, heartbeat, action log) and `AgentQueue` (atomic claim, leases,
-> backoff, orphan recovery, idempotency, dead-letter) in `sopno/core/agents/`;
-> `AgentScheduler` (interval/cron/ETA triggers → `run` jobs) and `AgentEvents`
-> (message + `state_delta` → pending input + `resume` job); `AgentWorker`
-> (claims `run`/`resume` jobs, drives ORIENT → DECIDE → ACT → OBSERVE, parks on
-> approval gates, enforces budgets + tool allowlists, bridges `kind='coding'`
-> sessions into the `CodingAgent` worktree harness) and `AgentRuntime` (workers
-> + scheduler + watchdog, orphan recovery + stale-session reclaim on boot);
-> the agent tools (`agent_create/list/status/send/pause/resume/kill/log`) with
-> schemas + registry; config under `agents_*`.
+> machine, heartbeat, action log, **alignment record** via `add_alignment`)
+> and `AgentQueue` (atomic claim, leases, backoff, orphan recovery,
+> idempotency, dead-letter) in `sopno/core/agents/`; `AgentScheduler`
+> (interval/cron/ETA triggers → `run` jobs) and `AgentEvents` (message +
+> `state_delta` → pending input + `resume` job); `AgentWorker` (claims
+> `run`/`resume` jobs, drives ORIENT → DECIDE → ACT → OBSERVE, parks on
+> approval gates, enforces budgets + tool allowlists, runs a periodic REFLECT
+> that promotes notes into the alignment record, and bridges `kind='coding'`
+> sessions into the `CodingAgent` worktree harness); `AgentRuntime` (workers +
+> scheduler + watchdog, orphan recovery + stale-session reclaim on boot);
+> **event sources** in `sources.py` — a poll-based `FileWatcher` (dirs under
+> `agents_file_watches`) and an HTTP `WebhookServer` (`agents_webhook_port`)
+> that wake parked agents; the agent tools
+> (`agent_create/list/status/send/pause/resume/kill/log/align`) plus the
+> coding tools (`coding_run`/`coding_status`) with schemas + registry, and a
+> HUD "Agents" tab; config under `agents_*`.
 > Related: [autonomous-coding.md](./autonomous-coding.md) (the primary task a
 > background agent will run); [features.md](./features.md) §41 lists "long-running
 > background agents" under "Future Features".
@@ -186,9 +192,11 @@ script that happens to call an LLM. Worker queues make this concrete:
   heartbeats, retries+backoff, dead-letter, idempotency keys.
 - `scheduler.py` — `AgentScheduler`: cron / interval / ETA triggers (reuses the
   reminder/rules pattern), wakes sessions on their events.
-- `events.py` — event sources: file-system watcher (inotify), HTTP/webhook
-  listener, schedule tick, manual message. Event → `state_delta` applied
-  atomically before resume.
+- `events.py` — `AgentEvents`: message + `state_delta` applied atomically before
+  resume; `sources.py` adds the external triggers: a poll-based `FileWatcher`
+  (dirs under `agents_file_watches`) and an HTTP `WebhookServer`
+  (`POST /webhook`, `agents_webhook_port`). Both write the same durable wake as
+  a human reply.
 - `worker.py` — `AgentWorker`: daemon thread that claims ready sessions, runs
   `ORIENT→DECIDE→ACT→OBSERVE→REFLECT`, checkpoints after every ACT, and parks
   sessions that are waiting on humans or events.
@@ -213,6 +221,10 @@ created → ready → running → waiting_human ─┐
 - `agent_send(name, message)` — wake a waiting agent with input (human approval).
 - `agent_pause(name)` / `agent_resume(name)` / `agent_kill(name)`.
 - `agent_log(name)` — audit trail from the action log.
+- `agent_align(name, correction)` — append a correction to the alignment record.
+- `coding_run(goal | tickets=[…], name?)` — start a coding agent (single goal
+  or a batch queue); `coding_status(name?)` — branch/state from the durable
+  `[coding-worktree]` marker.
 
 ### 6.5 Safety & control (per-agent capability profile)
 - Each agent gets an **allowlist of tools** (`tools: ["search_files",
@@ -257,13 +269,13 @@ created → ready → running → waiting_human ─┐
 
 | Step | Deliverable | Verification |
 |------|-------------|--------------|
-| 1 | `AgentSession` SQLite store + state machine | Unit tests for transitions, persistence, crash-resume |
-| 2 | `AgentQueue` (atomic claim, lease, retries+backoff, DLQ) | Unit tests incl. orphan recovery and idempotency |
-| 3 | `AgentScheduler` + event sources (schedule, file event, message) | Tests: event wakes a parked session, applies `state_delta` |
-| 4 | `AgentWorker` — one real agent (e.g. "news digest" using search + notes) | End-to-end: agent runs on schedule, writes artifact, parks on approval |
-| 5 | Tools (`agent_create/list/status/send/pause/resume/kill/log`) + schemas + HUD tab | Tool tests; CLI + HUD flows |
+| 1 ✅ | `AgentSession` SQLite store + state machine | Unit tests for transitions, persistence, crash-resume |
+| 2 ✅ | `AgentQueue` (atomic claim, lease, retries+backoff, DLQ) | Unit tests incl. orphan recovery and idempotency |
+| 3 ✅ | `AgentScheduler` + event sources (schedule, file event, message) | Tests: event wakes a parked session, applies `state_delta` |
+| 4 ✅ | `AgentWorker` — one real agent (e.g. "news digest" using search + notes) | End-to-end: agent runs on schedule, writes artifact, parks on approval |
+| 5 ✅ | Tools (`agent_create/list/status/send/pause/resume/kill/log/align`, `coding_run/status`) + schemas + HUD Agents tab | Tool tests; CLI + HUD flows |
 | 6 | Capability profiles + budgets + watchdog (hardening) | Tests: budget exhaust → dead; watchdog reclaims stale runs |
-| 7 | Hook `CodingAgent` (autonomous-coding.md) into a background agent session | A coding task survives a process restart and resumes from its last commit |
+| 7 ✅ | Hook `CodingAgent` (autonomous-coding.md) into a background agent session | A coding task runs via `coding_run` in a worktree, guarded by approval mode |
 
 Each step keeps the suite green and follows repo conventions (`unittest`,
 `settings.py` + `config.json` keys, `doc/CODEBASE.md` updates).

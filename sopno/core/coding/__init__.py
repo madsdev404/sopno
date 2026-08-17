@@ -30,10 +30,23 @@ Modules (one job each):
 
 from sopno.core.coding.agent import CodingAgent, TERMINAL_STATES  # noqa: F401
 
-__all__ = ["CodingAgent", "TERMINAL_STATES", "run_coding_task"]
+__all__ = ["CodingAgent", "TERMINAL_STATES", "run_coding_task", "run_coding_batch"]
 
 
 def run_coding_task(task_spec: str | dict, **kwargs) -> dict:
     """Run a coding ticket to completion. Returns the result dict."""
     agent = CodingAgent(**kwargs)
     return agent.run(task_spec)
+
+
+def run_coding_batch(tickets: list, **kwargs) -> list[dict]:
+    """
+    Run several coding tickets unattended (autonomous-coding.md step 7). Each
+    ticket gets a *fresh* CodingAgent, so one run's worktree/session binding can
+    never leak into the next. Returns one result dict per ticket.
+    """
+    results: list[dict] = []
+    for ticket in tickets:
+        agent = CodingAgent(**kwargs)
+        results.append(agent.run(ticket))
+    return results

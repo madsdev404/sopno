@@ -327,6 +327,8 @@ tools.
   structured event stream, not a chat transcript. Plan/memory alignment budget
   caps the stored plan+memory size. `kind` (`general`/`coding`) and
   `pending_action` (checkpointed approval gate) columns, no-op migrations.
+  `add_alignment(text)` appends a human/reflection correction to the alignment
+  record (exposed via `agent_align`).
 - `queue.py` — `AgentQueue`, own table in the same SQLite DB. `enqueue` with
   idempotency (a `dedupe_key` collapses repeats); `claim(worker, limit)` claims
   `ready` jobs atomically (`BEGIN IMMEDIATE`, `ORDER BY id ASC`) and stamps a
@@ -340,35 +342,42 @@ tools.
   semantics), and one-shot `eta:<ISO>`; `next_fire_at` computes the next match.
   `tick()` fires every due trigger as a `run` job (idempotency key tied to the
   fire timestamp — a crash between enqueue and bookkeeping can't double-run) and
-  checkpoints `last_fired_at` (new column, migrated in `__init__`).
+  checkpoints `last_fired_at` (new column, migrated in `__init__`). Terminal
+  (`done`/`dead`) and paused sessions are skipped.
 - `events.py` — `AgentEvents`, the wake channel: `wake(agent_id, message,
   state_delta)` checkpoints the delta (store's `apply_state_delta`, atomic),
   queues the message on pending input, enqueues a `resume` job, and appends an
   audit entry — the event-driven dormancy path for parked sessions.
+- `sources.py` — external event sources that produce the *same* durable wake as
+  a human reply. `FileWatcher` (polled thread): watches dirs from
+  `settings.agents_file_watches`, snapshots `mtime`+`size`, debounces by
+  advancing the snapshot on every tick, wakes the named agent on change
+  (`first scan is the baseline` — pre-existing files never fire). `WebhookServer`
+  (`ThreadingHTTPServer`, bound to `agents_webhook_host`/`agents_webhook_port`,
+  port 0 = disabled): `POST /webhook` accepts `{agent, message, state_delta}`
+  (agent by id *or* name; unknown → 404), `GET /health` liveness. Singletons
+  `get/set_watcher` + `get/set_webhook` for tests.
 - `worker.py` — `AgentWorker`, a daemon that claims `run`/`resume` jobs and
   drives a bounded ORIENT → DECIDE → ACT → OBSERVE loop. Per-agent lock (one
   session → one driver) + a shared dispatch lock (serializes the pending-action
   gate in `files.py`). Heartbeats the session and renews the job lease each
   step; executes tool calls through the session's allowlist (default excludes
-  the `agent_*` management tools); an approval gate parks the session in
-  `waiting_human` with the pending action checkpointed; queued human input is
+  the `agent_*`/`coding_*` management tools); an approval gate parks the session
+  in `waiting_human` with the pending action checkpointed; queued human input is
   drained on resume (a parked approval is answered Yes/No). Budgets
   (`max_turns`/`max_wall_minutes`/`max_actions_per_day`) end in `dead`; the
   per-job turn budget (`agents_job_max_turns` or `budget.max_turns`) hands the
-  session back to `ready` for dormancy. A `kind='coding'` session is routed
-  into `run_coding_task` (the worktree harness).
+  session back to `ready` for dormancy. After each general-agent drive it runs a
+  periodic **REFLECT** (`reflect_fn`, default `default_reflect` via `llm_chat`);
+  bullet notes are promoted into the session's alignment record, and reflection
+  failures are silent. A `kind='coding'` session is routed into the worktree
+  harness instead (no reflection).
 - `runtime.py` — `AgentRuntime`, the lifecycle owner started by the assistant:
-  boots `agents_concurrency` workers + the scheduler + a watchdog, recovers
-  orphan jobs and reclaims stale `running` sessions (no live job + heartbeat
-  older than `agents_lease_seconds`) on start and periodically.
-- `scheduler.py` — `AgentScheduler`: a polled daemon that fires session
-  triggers. `parse_schedule` handles `interval:<seconds>`, `cron:<5 fields>`
-  (stdlib-only parser — `*`/`*/n`/`a-b`/`a,b,c`, 3-letter names, dom/dow OR
-  semantics), and one-shot `eta:<ISO>`; `next_fire_at` computes the next match.
-  `tick()` fires every due trigger as a `run` job (idempotency key tied to the
-  fire timestamp — a crash between enqueue and bookkeeping can't double-run) and
-  checkpoints `last_fired_at` (new column, migrated in `__init__`). Terminal
-  (`done`/`dead`) and paused sessions are skipped.
+  boots `agents_concurrency` workers (wired with `reflect_fn=default_reflect`)
+  + the scheduler + a watchdog, starts the event sources (`FileWatcher` when
+  watches are configured, `WebhookServer` when a port is set), recovers orphan
+  jobs and reclaims stale `running` sessions (no live job + heartbeat older
+  than `agents_lease_seconds`) on start and periodically.
 
 **`sopno/core/coding/`** — the autonomous coding harness (design in
 `doc/roadmap/autonomous-coding.md`). Split from the original ~844-line
@@ -385,15 +394,30 @@ job" rule.
   `session_id` make it fully unit-testable. With a `store` + `session_id`, a
   `[coding-worktree]` record is persisted in the session's working memory and a
   later run reattaches to the same branch (`WorktreeSession.attach`) — the
-  background-agent crash-resume path.
-- `tools.py` — `ToolDispatcher`: allowlists `ALLOWED_TOOLS`, filters
-  `get_schema()` for `tools_schema()`, and `_gate`'s every write through
+  background-agent crash-resume path. On top of the loop: three local tools —
+  `delegate` (sub-agent digest via `run_subagent`, truncated), `escalate`
+  (pauses the run in `review_required` mode with a `blocked_reason`; otherwise
+  recorded into `escalations` and the run continues), `run_review` (self-review
+  with a structured verdict that gates success in `review_required`) — plus
+  `coding_approval_mode` handling (`auto_merge_guardrailed`/`unattended`/
+  `review_required`), a red-test baseline on `main` when `coding_require_red_test`
+  (green baseline → RED-FIRST advisory note, not a hard block; `baseline_green`
+  lands in the result), and `_auto_merge`: branch green → merge into main →
+  merged tree re-verified → hard-reset rollback on red or failed push →
+  optional push behind `coding_push_enabled`. `run_coding_batch(tickets)` in
+  `__init__.py` runs a fresh `CodingAgent` per ticket.
+- `tools.py` — `ToolDispatcher`: allowlists `ALLOWED_TOOLS` (+ the local
+  `delegate`/`run_review`/`escalate` schemas appended to the LLM-facing schema),
+  filters `get_schema()` for `tools_schema()`, and `_gate`'s every write through
   `files._authorize` (bypassing the interactive Yes/No, never the gate).
   Refusals are observations returned to the LLM, not errors.
 - `worktree.py` — `WorktreeSession`: creates/cleans the worktree
   (`settings.coding_worktree_dir`, branch `sopno/<slug>-<ts>`, safe-name
   checks), `setup()` captures `base_sha`, `checkpoint()` commits with a
-  guarded identity, `diff_lines()` counts changed lines since base.
+  guarded identity, `diff_lines()` counts changed lines since base,
+  `merge_back()` merges the branch into main (`--no-ff`, keeps the pre-merge
+  head for rollback), `abort_merge()` undoes an in-progress *or* committed
+  merge (`reset --hard` to the pre-merge head), `push()` pushes the branch.
 - `verify.py` — `Verifier`: `resolve_recipe` picks the task spec's
   `verify_recipe`, or a default test command (`python -m unittest discover` via
   a `.venv`-aware `guess_python`, `--quiet`); `run()`/`green()` report exit
@@ -691,7 +715,7 @@ importable as `from sopno.tools.builtins import <name>` aliases):
 - `web/` — internet tools (`browser`, `search`, `network`).
 - `data/` — data tools (`databases`, `packages`).
 - `knowledge/` — knowledge tools (`vision`, `email`, `calendar`, `notes`).
-- `automation/` — proactive tools (`reminders`, `rules`, `subagents`, `agents`).
+- `automation/` — proactive tools (`reminders`, `rules`, `subagents`, `agents`, `coding`).
 
 - **`system/system.py`** — OS-level tools.
   - `open_application(app_name)` — launches apps via `subprocess.Popen` using the
@@ -897,6 +921,18 @@ importable as `from sopno.tools.builtins import <name>` aliases):
     jobs and clears the schedule.
   - `agent_log(name, limit)` — append-only audit trail (actions, messages,
     transitions, errors).
+  - `agent_align(name, correction)` — append a correction/preference to the
+    agent's alignment record (drives ORIENT context and the periodic REFLECT).
+- **`automation/coding.py`** — the background coding-agent entry points, backed
+  by `sopno/core/coding/` (harness) + `sopno/core/agents/` (session/queue).
+  - `coding_run(goal | tickets=[…], name?, ...)` — start a coding agent: single
+    `goal` or a batch of `tickets` (each `{goal, name?, schedule?, verify_recipe?,
+    coding_approval_mode?}`). Creates a `kind='coding'` session (transition
+    `ready`) and enqueues a `run` job with an idempotency key; returns the
+    session + queued status.
+  - `coding_status(name?)` — state + branch: parses the durable
+    `[coding-worktree] {…}` marker from the session's working memory so a fresh
+    context can see which branch a live coding run is on.
 - **`dev/git.py`** — git repository tools, all routed through the shared terminal
   session (`git -C <repo> …`, color forced off) so the blocklist applies and any
   repository can be addressed explicitly.
@@ -943,13 +979,15 @@ widgets in `widgets/`, and the look & feel in `visuals/`.
   grip. Spawns `AssistantWorker` in a daemon thread and wires its Qt signals to UI
   methods. `position_hud()` pins it to the top-right of the screen. The `≡`
   chrome button toggles the read-only `DashboardPanel`.
-- **`dashboard.py`** — `DashboardPanel(QTabWidget)`: five read-only tabs backed
+- **`dashboard.py`** — `DashboardPanel(QTabWidget)`: six read-only tabs backed
   by the same live objects the CLI uses — **Settings** (`config.json` + the
   runtime `settings` snapshot, secret-looking values masked), **Memory**
   (`MemoryStore.stats()` + top memories), **Tools** (all `get_registered_names()`),
   **Logs** (live stream fed by the worker's `log_message` signal via
-  `append_log`), and **Models** (Ollama `list()`, guarded). `refresh()`
-  re-reads the static tabs each time the panel is shown.
+  `append_log`), **Models** (Ollama `list()`, guarded), and **Agents** (a
+  lazy-imported status list of background agents + any live coding branch from
+  `_coding_record`). `refresh()` re-reads the static tabs each time the panel
+  is shown.
 - **`worker.py`** — `AssistantWorker(QObject)`: the bridge between the assistant
   thread and Qt's signal/slot system. Emits `status_changed`, `speech_detected`,
   `reply_generated`, `log_message`; proxies mode / listen-mode / text input to the
@@ -1043,7 +1081,7 @@ python3 -m unittest discover -s tests
 | Subpackage / file | What it verifies |
 |------|------------------|
 | `voice/` | Audio stack: `test_tts.py` (`_is_bangla()` + engine routing), `test_stt.py` (Whisper-first, Google fallback only when enabled), `test_wakeword.py` (fallback + lazy detector), `test_barge.py` (interrupt logic) |
-| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py`, `test_agents.py` (session + queue), `test_agent_scheduler.py` (triggers + events), `test_agent_worker.py` (worker loop + coding bridge), `test_agent_runtime.py` (lifecycle + reclaim), `test_agent_tools.py` (agent management tools), `test_coding.py` (coding harness loop + resume) |
+| `core/` | Brain: `test_assistant.py` (context lifecycle + dispatcher routing), `test_memory.py`, `test_semantic.py`, `test_researcher.py`, `test_reminders.py`, `test_rules.py`, `test_subagents.py`, `test_agents.py` (session + queue), `test_agent_scheduler.py` (triggers + events), `test_agent_sources.py` (file watcher + webhook wake), `test_agent_worker.py` (worker loop + reflect + coding bridge), `test_agent_runtime.py` (lifecycle + reclaim + sources), `test_agent_tools.py` (agent + coding management tools), `test_coding.py` (coding harness loop + escalation + auto-merge + batch) |
 | `tools/` | One file per skill: `test_browser.py`, `test_calendar.py`, `test_databases.py`, `test_desktop.py`, `test_email.py`, `test_files.py`, `test_git.py`, `test_manage.py`, `test_network.py`, `test_notes.py`, `test_packages.py`, `test_readers.py`, `test_terminal.py`, `test_vision.py` |
 | `integration/` | Cross-cutting: `test_mcp.py` (client/server), `test_plugins.py` (dynamic loader) |
 | `test_tools.py` | Registry-level checks (all registered tools present, tool output formats, subprocess call wiring) |
@@ -1135,6 +1173,10 @@ All settings live in **`config.json`** at the repo root and are read by
 | `agents_worker_poll_seconds` | `2` | How often `AgentWorker` polls the queue for jobs |
 | `agents_job_max_turns` | `20` | Per-job agent-loop turns before dormancy |
 | `agents_watchdog_seconds` | `300` | How often `AgentRuntime` reclaims stale sessions |
+| `agents_file_watches` | `[]` | Directories a `FileWatcher` polls; each `{"path", "agent", "message"?, "recursive"?}` |
+| `agents_file_poll_seconds` | `10` | How often the `FileWatcher` rescans watched dirs |
+| `agents_webhook_host` | `127.0.0.1` | Host the webhook server binds to |
+| `agents_webhook_port` | `0` | Port for `POST /webhook` (0 = webhook disabled) |
 | `coding_enabled` | `true` | Master switch for autonomous coding |
 | `coding_worktree_dir` | `sopno/memory/worktrees` | Where coding worktrees live |
 | `coding_max_turns` | `150` | Cap on coding-loop turns |
@@ -1142,9 +1184,9 @@ All settings live in **`config.json`** at the repo root and are read by
 | `coding_max_wall_minutes` | `120` | Wall-clock budget per run |
 | `coding_max_diff_lines` | `800` | Line budget per run (stall + stop) |
 | `coding_stall_rounds` | `6` | No-progress rounds before the run stalls |
-| `coding_approval_mode` | `review_required` | Gate for submitting changes |
+| `coding_approval_mode` | `review_required` | How a run ends: `review_required` (pauses on `escalate`, gates success on review) · `auto_merge_guardrailed` (self-reviews, then auto-merges into main if the merged tree stays green) · `unattended` (records escalations, leaves the branch, never merges) |
 | `coding_protected_paths` | `[config.json, sopno/memory, .git]` | Paths the coding agent may never write |
-| `coding_require_red_test` | `true` | Require a failing test before fixes count |
+| `coding_require_red_test` | `true` | Run the recipe on `main` at setup; a green baseline appends a RED-FIRST advisory |
 | `coding_push_enabled` | `false` | Allow pushing branches (`git_push_enabled` also required) |
 
 ---

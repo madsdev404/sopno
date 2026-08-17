@@ -13,6 +13,7 @@ from sopno.core.agents.events import AgentEvents, set_events
 from sopno.core.agents.queue import AgentQueue, set_queue
 from sopno.core.agents.session import AgentSessionStore, set_store
 from sopno.tools.builtins.automation.agents import (
+    agent_align,
     agent_create,
     agent_kill,
     agent_list,
@@ -22,6 +23,7 @@ from sopno.tools.builtins.automation.agents import (
     agent_send,
     agent_status,
 )
+from sopno.tools.builtins.automation.coding import coding_run, coding_status
 
 
 def _temp_db() -> str:
@@ -159,6 +161,60 @@ class InspectTest(AgentToolsSetup):
         self.store.log_action(self.store.get_by_name("alpha")["id"],
                               "message", "hello")
         self.assertIn("hello", agent_log("alpha", limit=5))
+
+    def test_agent_align_records_a_correction(self) -> None:
+        agent_create("alignme", "Goal")
+        text = agent_align("alignme", "always run the tests before committing")
+        self.assertIn("Alignment recorded", text)
+        agent = self.store.get_by_name("alignme")
+        self.assertEqual(agent["alignment"][0]["text"],
+                         "always run the tests before committing")
+        self.assertIn("correction", agent_align("alignme", ""))
+        self.assertIn("No agent named", agent_align("ghost", "x"))
+
+
+class CodingToolsTest(AgentToolsSetup):
+    def test_coding_run_creates_session_and_queues_job(self) -> None:
+        text = coding_run("Add a CLI flag", name="fixer")
+        self.assertIn("created", text)
+        self.assertIn("queued", text)
+        agent = self.store.get_by_name("fixer")
+        self.assertEqual(agent["kind"], "coding")
+        self.assertEqual(agent["state"], "ready")
+        runs = [j for j in self.queue.peek() if j["kind"] == "run"
+                and j["agent_id"] == agent["id"]]
+        self.assertEqual(len(runs), 1)
+
+    def test_coding_run_requires_a_goal(self) -> None:
+        self.assertIn("needs a goal", coding_run(""))
+
+    def test_coding_run_batch_queues_each_ticket(self) -> None:
+        text = coding_run(tickets=[
+            {"goal": "Ticket one"},
+            {"goal": "Ticket two", "schedule": "interval:3600"},
+        ])
+        self.assertIn("Queued coding batch", text)
+        self.assertIn("Ticket one", coding_status())
+        self.assertEqual(len([a for a in self.store.list()
+                              if a.get("kind") == "coding"]), 2)
+
+    def test_coding_run_rejects_bad_tickets(self) -> None:
+        self.assertIn("needs a goal", coding_run(tickets=[{"goal": ""}]))
+        self.assertIn("per-ticket fields",
+                      coding_run(goal="x", tickets=[{"goal": "y"}]))
+
+    def test_coding_status_shows_branch_from_record(self) -> None:
+        coding_run("Watch this branch", name="watchdog")
+        agent_id = self.store.get_by_name("watchdog")["id"]
+        self.store.append_memory(
+            agent_id,
+            "[coding-worktree] "
+            '{"branch": "sopno/watch-20240101-000000", "base": "abc"}',
+        )
+        text = coding_status("watchdog")
+        self.assertIn("sopno/watch-20240101-000000", text)
+        self.assertIn("watchdog", coding_status())
+        self.assertIn("No agent named", coding_status("ghost"))
 
 
 if __name__ == "__main__":

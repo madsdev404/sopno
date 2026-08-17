@@ -338,3 +338,31 @@ def agent_log(name: str, limit: int = 50) -> str:
         lines.append(f"- {entry['created_at']} {entry['kind']}: "
                      f"{entry['detail']}")
     return "\n".join(lines)
+
+
+def agent_align(name: str, correction: str) -> str:
+    """
+    Give a background agent a durable correction / preference. It is recorded in
+    the agent's alignment store and injected into its ORIENT phase on resume.
+
+    Args:
+        name: The agent's name.
+        correction: The instruction to keep going forward, e.g. 'always run the
+            tests before committing'.
+
+    Returns:
+        Confirmation, or a reason the agent doesn't exist.
+    """
+    if not _enabled():
+        return "Background agents are disabled in config.json (agents_enabled)."
+    agent = _find(name)
+    if agent is None:
+        return f"No agent named '{name}'."
+    correction = (correction or "").strip()
+    if not correction:
+        return "Give the agent a correction to record."
+    count = _store().add_alignment(agent["id"], correction)
+    _store().log_action(agent["id"], "message",
+                        f"alignment: {correction[:200]}")
+    return (f"Alignment recorded for '{name}' "
+            f"({count} note(s) on file). It applies from the next resume.")

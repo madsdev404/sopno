@@ -128,10 +128,14 @@ class ServerDirectionTest(unittest.TestCase):
         self.assertIn("sopno_get_current_time", registry.get_registered_names())
 
     def test_server_call_builtin(self) -> None:
+        from datetime import datetime
+
         self.hub.refresh()
         out = registry.execute_tool("sopno_get_current_time", {})
-        self.assertIn("PM", out)
-        self.assertIn("Sunday, August 16", out)
+        self.assertTrue(any(mark in out for mark in ("AM", "PM")),
+                        f"expected a 12-hour clock, got: {out}")
+        expected = datetime.now().strftime("%A, %B %d").replace(" 0", " ")
+        self.assertIn(expected, out)
 
 
 if __name__ == "__main__":

@@ -234,6 +234,16 @@ class Settings:
         self.agents_watchdog_seconds: float = float(
             data.get("agents_watchdog_seconds", 300)
         )
+        # Event sources (sopno/core/agents/sources.py, step 7): a poll-based
+        # file watcher and an HTTP webhook receiver that wake parked sessions.
+        # agents_file_watches: [{path, agent, message?, recursive?}].
+        # agents_webhook_port 0 = disabled (bound to localhost by default).
+        self.agents_file_watches: list = data.get("agents_file_watches", [])
+        self.agents_file_poll_seconds: float = float(
+            data.get("agents_file_poll_seconds", 10.0)
+        )
+        self.agents_webhook_host: str = data.get("agents_webhook_host", "127.0.0.1")
+        self.agents_webhook_port: int = int(data.get("agents_webhook_port", 0))
 
         # ── Autonomous coding ────────────────────────────────
         # CodingAgent loop (sopno/core/coding.py). Worktrees live under

@@ -56,6 +56,8 @@ class CodingAgent:
         llm_step: Optional[LlmStep] = None,
         git_runner: Optional[Callable[[str, str], dict]] = None,
         verify_runner: Optional[Callable[[str], dict]] = None,
+        delegate_fn: Optional[Callable[[str, str], str]] = None,
+        review_runner: Optional[Callable[[str], dict]] = None,
         store=None,
         session_id: Optional[int] = None,
     ) -> None:
@@ -64,6 +66,8 @@ class CodingAgent:
         self.llm_step = llm_step or self._default_llm_step
         self.git_runner = git_runner or self._default_git_runner
         self.verify_runner = verify_runner or self._default_verify_runner
+        self.delegate_fn = delegate_fn or self._default_delegate_fn
+        self.review_runner = review_runner or self._default_review_runner
         self.store = store
         self.session_id = session_id
 
@@ -76,6 +80,14 @@ class CodingAgent:
         self.blocked_reason: Optional[str] = None
         self.final_text: Optional[str] = None
         self.started_at = 0.0
+        # Step 4: escalation record (populated in auto_merge_guardrailed /
+        # unattended modes) and step 7: merge outcome.
+        self.escalations: list[dict] = []
+        self.review_result: Optional[dict] = None
+        self.review_used = False
+        self.merged = False
+        self.merged_sha: Optional[str] = None
+        self.baseline_green: Optional[bool] = None
 
     # ── Injection points (defaults) ──────────────────────────────────────────
 
@@ -88,6 +100,25 @@ class CodingAgent:
 
     def _default_verify_runner(self, command: str) -> dict:
         return _term._run_command_raw(command, timeout=120)
+
+    def _default_delegate_fn(self, agent: str, task: str) -> str:
+        """Step 5: run a focused sub-agent and return only its digest."""
+        from sopno.core.subagents import run_subagent
+        out = run_subagent(agent, task)
+        return (out or "")[:2000]
+
+    def _default_review_runner(self, diff_summary: str) -> dict:
+        """Step 5: ask the reviewer sub-agent (a different role) for a verdict."""
+        from sopno.core.subagents import run_subagent
+        prompt = (
+            "Review this diff. Judge correctness, security, and scope. Reply "
+            "with exactly one line starting APPROVED or BLOCKED, then a short "
+            "reason.\n\nDIFF:\n"
+            + (diff_summary or "(empty diff)")[:4000]
+        )
+        text = (run_subagent("reviewer", prompt) or "").strip()
+        ok = not text.upper().startswith("BLOCKED")
+        return {"ok": ok, "issues": text[:1000]}
 
     # ── Budgets ───────────────────────────────────────────────────────────────
 
@@ -174,6 +205,11 @@ class CodingAgent:
             "changes": self.changes,
             "diff_lines": diff_lines,
             "summary": self.final_text or "",
+            "escalations": list(self.escalations),
+            "merged": self.merged,
+            "merged_sha": self.merged_sha,
+            "baseline_green": self.baseline_green,
+            "review": dict(self.review_result) if self.review_result else None,
         }
 
     # ── The loop ──────────────────────────────────────────────────────────────
@@ -224,9 +260,23 @@ class CodingAgent:
             assert wt.worktree is not None
 
             self.worktrees = wt
-            self.dispatcher = ToolDispatcher(self.repo, wt.worktree, paths_allowed)
+            self.dispatcher = ToolDispatcher(
+                self.repo, wt.worktree, paths_allowed,
+                delegate_fn=self.delegate_fn,
+            )
             self.verifier = Verifier(wt.worktree, self.verify_runner, recipe)
             self._save_coding_record(wt.branch, wt.base_sha)
+
+            # Step 4: red/green baseline — establish whether a failing test
+            # already exists before any change. When the baseline is green the
+            # agent gets an advisory RED-FIRST note (never a hard block).
+            if settings.coding_require_red_test:
+                self.verifier.run()
+                self.baseline_green = self.verifier.green()
+                self._log_action(
+                    "verify",
+                    "baseline: " + ("green" if self.baseline_green else "red"),
+                )
 
             self._write_plan(goal, spec)
             messages: list[dict] = [
@@ -239,6 +289,14 @@ class CodingAgent:
                     "content": "This run resumes an existing branch. Read "
                                "PLAN.md and progress.md first, then continue "
                                "the work from the last checkpoint commit.",
+                })
+            if self.baseline_green:
+                messages.append({
+                    "role": "user",
+                    "content": ("RED-FIRST note: the verification recipe is "
+                                "green on the base commit. If this ticket "
+                                "implies a fix, write a failing test (red) "
+                                "first, then make it pass."),
                 })
             self._log_action("transition", f"started run on branch {branch}"
                              + (" (resumed)" if resumed else ""))
@@ -282,6 +340,21 @@ class CodingAgent:
                     args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
                     if not isinstance(args, dict):
                         args = {}
+                    if name == "escalate":
+                        result = self._escalate(args)
+                        messages.append({"role": "tool", "content": result})
+                        self._log_action(
+                            "action",
+                            f"escalate({json.dumps(args)[:500]}) -> {result[:200]}",
+                        )
+                        if self.blocked_reason:
+                            break
+                        continue
+                    if name == "run_review":
+                        result = self._run_review()
+                        messages.append({"role": "tool", "content": result})
+                        self._log_action("action", f"run_review() -> {result[:200]}")
+                        continue
                     result = self.dispatcher.dispatch(name, args)
                     messages.append({"role": "tool", "content": result})
                     self._log_action(
@@ -305,10 +378,31 @@ class CodingAgent:
                     state, reason = "no_op", "nothing was changed"
                 elif not self.verifier.green():
                     state, reason = "blocked", (
-                        "the verification recipe did not pass; the work is on the "
-                        "branch for review")
+                        "the verification recipe did not pass; the work is on "
+                        "the branch for review")
                 else:
-                    state, reason = "success", "goal met and verification green"
+                    # Step 5/7: optional review step, then the approval gate.
+                    mode = settings.coding_approval_mode
+                    review_needed = (
+                        mode == "auto_merge_guardrailed"
+                        or any(step.get("kind") == "review" for step in recipe)
+                    )
+                    if review_needed and not self.review_used:
+                        self._run_review()
+                    if self.review_result is not None and not self.review_result.get("ok"):
+                        state, reason = "blocked", (
+                            "reviewer BLOCKED the diff: "
+                            f"{self.review_result.get('issues', '')[:300]}")
+                    elif mode == "auto_merge_guardrailed":
+                        merged, err = self._auto_merge()
+                        if err:
+                            state, reason = "blocked", err
+                        else:
+                            state, reason = "success", (
+                                f"goal met, verification green, and branch "
+                                f"auto-merged as {merged[:12]}")
+                    else:
+                        state, reason = "success", "goal met and verification green"
 
             diff_lines = wt.diff_lines()
             self._write_summary(goal, state, reason, diff_lines)
@@ -374,9 +468,101 @@ class CodingAgent:
             f"- Commits: {len(self.worktrees.commits)}\n"
             f"- Changes applied: {self.changes}\n"
             f"- Diff (added+removed lines): {diff_lines}\n"
-            f"- Turns: {self.turns}\n\n"
+            f"- Turns: {self.turns}\n"
         )
+        if self.merged and self.merged_sha:
+            summary += f"- Auto-merged into main as {self.merged_sha[:12]}\n"
+        summary += "\n"
+        if self.escalations:
+            summary += "## Escalations\n"
+            summary += "\n".join(
+                f"- Q: {e['question']}" + (f" (reason: {e['reason']})" if e["reason"] else "")
+                for e in self.escalations
+            ) + "\n\n"
+        if self.review_result is not None:
+            verdict = "APPROVED" if self.review_result.get("ok") else "BLOCKED"
+            summary += f"## Review: {verdict}\n{self.review_result.get('issues', '')}\n\n"
         if self.final_text:
             summary += f"## Agent summary\n\n{self.final_text}\n"
-        summary += "\nReview and merge this branch at your convenience.\n"
+        if not self.merged:
+            summary += "\nReview and merge this branch at your convenience.\n"
         self.worktrees.write_doc("SUMMARY.md", summary)
+
+    # ── Step 4: escalation ───────────────────────────────────────────────────
+
+    def _escalate(self, args: dict) -> str:
+        """Route an escalate() call per the approval mode."""
+        reason = (args.get("reason") or "").strip()
+        question = (args.get("question") or "").strip()
+        if not question:
+            return "escalate needs a 'question' to ask a human."
+        mode = settings.coding_approval_mode
+        if mode == "review_required":
+            self.blocked_reason = f"escalated to human: {question[:300]}"
+            return f"[Escalated to a human — run paused] {question}"
+        self.escalations.append({
+            "reason": reason[:300], "question": question[:500],
+            "turn": self.turns,
+        })
+        self._log_action("message", f"escalation: {question[:200]}")
+        return f"[Escalation recorded for later review] {question}"
+
+    # ── Step 5: sub-agent review ─────────────────────────────────────────────
+
+    def _diff_summary(self) -> str:
+        assert self.worktrees is not None and self.worktrees.worktree is not None
+        if not self.worktrees.commits:
+            return "(no commits yet)"
+        res = self.git_runner(
+            f"--no-pager diff {q(self.worktrees.base_sha)}...HEAD --stat",
+            str(self.worktrees.worktree),
+        )
+        return (res.get("stdout") or "").strip() or "(no changes)"
+
+    def _run_review(self) -> str:
+        """Ask the reviewer sub-agent to judge the current diff."""
+        try:
+            result = dict(self.review_runner(self._diff_summary()) or {})
+        except Exception as e:  # noqa: BLE001
+            result = {"ok": False, "issues": f"review failed: {e}"}
+        self.review_used = True
+        self.review_result = result
+        verdict = "APPROVED" if result.get("ok") else "BLOCKED"
+        return f"Review: {verdict} — {str(result.get('issues', ''))[:500]}"
+
+    # ── Step 7: guardrailed auto-merge ───────────────────────────────────────
+
+    def _auto_merge(self) -> tuple[Optional[str], str]:
+        """
+        Merge the branch into the main checkout with three guardrails: the
+        branch must be green, the merge must be clean, and the merged main
+        tree must re-verify green (otherwise the merge is aborted). Git push /
+        remote actions stay off unless ``coding_push_enabled``.
+        """
+        assert self.worktrees is not None and self.verifier is not None
+        if not self.worktrees.commits:
+            return None, "nothing to merge — the run made no commits"
+        # Guardrail 1: the branch itself must be green.
+        self.verifier.run()
+        if not self.verifier.green():
+            return None, "auto-merge aborted: verification is not green"
+        # Guardrail 2: clean merge; abort and report on any conflict/error.
+        merged, err = self.worktrees.merge_back()
+        if err:
+            return None, err
+        # Guardrail 3: re-verify the merged main tree; abort on red.
+        merged_verifier = Verifier(self.repo, self.verify_runner,
+                                   self.verifier.recipe)
+        merged_verifier.run()
+        if not merged_verifier.green():
+            self.worktrees.abort_merge()
+            return None, ("auto-merge aborted: the merged main tree failed "
+                          "verification; the branch is intact")
+        if settings.coding_push_enabled:
+            push_err = self.worktrees.push()
+            if push_err:
+                self.worktrees.abort_merge()
+                return None, push_err
+        self.merged = True
+        self.merged_sha = merged
+        return merged, ""

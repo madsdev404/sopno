@@ -105,8 +105,10 @@ from sopno.tools.builtins.automation.agents import (
     agent_resume,
     agent_kill,
     agent_log,
+    agent_align,
 )
 from sopno.tools.builtins.automation.subagents import run_subagent, subagent_list
+from sopno.tools.builtins.automation.coding import coding_run, coding_status
 from sopno.llm.researcher import research
 
 
@@ -189,8 +191,11 @@ _REGISTRY: dict[str, Callable[..., str]] = {
     "agent_resume": agent_resume,
     "agent_kill": agent_kill,
     "agent_log": agent_log,
+    "agent_align": agent_align,
     "run_subagent": run_subagent,
     "subagent_list": subagent_list,
+    "coding_run": coding_run,
+    "coding_status": coding_status,
     "git_status": git_status,
     "git_log": git_log,
     "git_diff": git_diff,

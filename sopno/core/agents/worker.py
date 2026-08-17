@@ -55,7 +55,8 @@ from sopno.tools.schema import get_schema
 # / self-termination surprises); a default allowlist is everything else.
 MANAGEMENT_TOOLS = frozenset({
     "agent_create", "agent_list", "agent_status", "agent_send",
-    "agent_pause", "agent_resume", "agent_kill", "agent_log",
+    "agent_pause", "agent_resume", "agent_kill", "agent_log", "agent_align",
+    "coding_run", "coding_status",
 })
 
 # A job drives at most this many turns before handing the session back to
@@ -121,6 +122,7 @@ class AgentWorker(threading.Thread):
         run_check: Optional[Callable[[], bool]] = None,
         llm_step: Optional[LlmStep] = None,
         coding_runner: Optional[Callable[..., dict]] = None,
+        reflect_fn: Optional[Callable[[dict], str]] = None,
     ) -> None:
         super().__init__(name=f"agent-worker-{worker_id or 'x'}", daemon=True)
         self._store = store or AgentSessionStore(settings.agents_path)
@@ -133,6 +135,10 @@ class AgentWorker(threading.Thread):
         self._run_check = run_check or (lambda: True)
         self.llm_step = llm_step or self._default_llm_step
         self.coding_runner = coding_runner or run_coding_task
+        # Step 7 (long-running-agents.md): distill a finished run into durable
+        # alignment notes. None (the default) skips reflection entirely — the
+        # runtime opts in by passing ``default_reflect``.
+        self.reflect_fn = reflect_fn
 
     # ── Injection point (default) ─────────────────────────────────────────────
 
@@ -204,6 +210,7 @@ class AgentWorker(threading.Thread):
             outcome = self._drive_coding(agent["id"])
         else:
             outcome = self._drive_agent(agent["id"], job)
+            self._reflect(agent["id"])
         self._queue.finish(
             job["id"], self._worker_id,
             f"{outcome['state']}: {outcome['reason']}",
@@ -413,6 +420,35 @@ class AgentWorker(threading.Thread):
             )
         return prompt
 
+    # ── REFLECT: distill a finished run into durable alignment notes ──────────
+
+    def _reflect(self, agent_id: int) -> int:
+        """
+        After a general-agent run, ask the model (if ``reflect_fn`` is wired)
+        to extract durable corrections/preferences from the run and store them
+        in the alignment record, so the next context window follows them.
+        Returns the number of notes stored. Failures are silent — reflection
+        is a bonus, never a hard dependency.
+        """
+        if self.reflect_fn is None:
+            return 0
+        try:
+            agent = self._store.get(agent_id)
+            if agent is None or (agent.get("kind") or "general") == "coding":
+                return 0
+            text = (self.reflect_fn(agent) or "").strip()
+        except Exception:  # noqa: BLE001
+            return 0
+        count = 0
+        for line in text.splitlines():
+            line = line.strip().lstrip("-*• ").strip()
+            if line and self._store.add_alignment(agent_id, line) > 0:
+                count += 1
+        if count:
+            self._store.log_action(agent_id, "message",
+                                   f"reflected {count} alignment note(s)")
+        return count
+
     # ── Resume: apply queued human input / approval decisions ────────────────
 
     def _drain_input(self, agent_id: int) -> list[dict]:
@@ -488,6 +524,39 @@ class AgentWorker(threading.Thread):
 # ── Singleton access (shared by the runtime / tools / tests) ─────────────────
 
 _WORKERS: list[AgentWorker] = []
+
+
+def default_reflect(agent: dict[str, Any]) -> str:
+    """
+    The runtime's default REFLECT step: ask the model to extract one-line
+    alignment notes (corrections, preferences, lessons) from an agent's run so
+    the next fresh context window follows them. Returns raw lines; ``_reflect``
+    filters and stores them.
+    """
+    try:
+        alignment = agent.get("alignment") or []
+        prior = "\n".join(
+            f"- {e.get('text', '')}" for e in alignment[-_ORIENT_ALIGNMENT:]
+        ) or "(none)"
+        messages = [
+            {"role": "system", "content": (
+                "You distill durable alignment notes from an agent's run: "
+                "corrections the user gave, preferences the agent learned, and "
+                "lessons worth repeating. Reply with ONLY short note lines, one "
+                "per line, no bullets, no preamble. Omit anything already "
+                "covered by the prior alignment.")},
+            {"role": "user", "content": (
+                f"Agent: {agent.get('name')}\n"
+                f"Goal: {agent.get('goal') or ''}\n"
+                f"Prior alignment:\n{prior}\n"
+                f"Working memory (recent):\n"
+                + "\n".join(f"- {e.get('text', '')}"
+                            for e in (agent.get('working_memory') or [])[-6:]))},
+        ]
+        response = llm_chat(messages, tools=None)
+        return message_as_dict(response["message"]).get("content", "")
+    except Exception:  # noqa: BLE001
+        return ""
 
 
 def get_workers() -> list[AgentWorker]:

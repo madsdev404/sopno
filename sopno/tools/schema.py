@@ -1637,6 +1637,85 @@ TOOLS_SCHEMA: list[dict[str, Any]] = [
                 "required": ["name"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "agent_align",
+            "description": "Give a background agent a durable correction/preference. It is stored and injected into the agent's ORIENT phase on resume.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "The agent's name."
+                    },
+                    "correction": {
+                        "type": "string",
+                        "description": "The instruction to keep going forward."
+                    }
+                },
+                "required": ["name", "correction"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "coding_run",
+            "description": "Kick off an autonomous coding ticket in the background (or a batch of tickets). Creates a coding session and queues its run job; watch it with coding_status.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "goal": {
+                        "type": "string",
+                        "description": "The ticket — what to implement / fix."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Optional session name (auto-generated from the goal otherwise)."
+                    },
+                    "schedule": {
+                        "type": "string",
+                        "description": "Optional trigger: interval:<seconds>, cron:<min hour dom month dow>, or eta:YYYY-MM-DD HH:MM:SS."
+                    },
+                    "tools": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Optional tool allowlist; empty = all safe tools."
+                    },
+                    "budget": {
+                        "type": "object",
+                        "description": "Optional ceilings: max_turns, max_wall_minutes, max_actions_per_day."
+                    },
+                    "tickets": {
+                        "type": "array",
+                        "items": {"type": "object"},
+                        "description": "Optional batch of ticket dicts ({goal, name?, schedule?, tools?, budget?}) for unattended runs."
+                    }
+                }
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "coding_status",
+            "description": "Show coding sessions (state, budget usage, and the worktree branch each is working on).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "name": {
+                        "type": "string",
+                        "description": "A specific session name (default: all coding sessions)."
+                    },
+                    "limit": {
+                        "type": "integer",
+                        "description": "How many sessions to show (default 20)."
+                    }
+                }
+            }
+        }
     }
 ]
 
