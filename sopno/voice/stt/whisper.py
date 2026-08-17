@@ -1,9 +1,10 @@
 """
 sopno/voice/stt/whisper.py
-━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 faster-whisper model loading and offline transcription.
 """
 
+import concurrent.futures
 import os
 import tempfile
 from pathlib import Path
@@ -22,6 +23,9 @@ from sopno.voice.stt.scoring import (
 
 # Quiet HF Hub noise; we prefer local files
 os.environ.setdefault("HF_HUB_DISABLE_TELEMETRY", "1")
+
+# Shared pool for Whisper transcription timeouts.
+_STT_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="stt")
 
 # ── Whisper singleton ──────────────────────────────────────────────────────────
 _whisper_model = None
@@ -149,13 +153,24 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
             prob = float(getattr(info, "language_probability", 0.0) or 0.0)
             return text, segments, detected, prob
 
+        def _run_with_timeout(lang: Optional[str]):
+            """Run transcription in a thread with timeout to prevent hangs."""
+            timeout = settings.stt_timeout
+            future = _STT_EXECUTOR.submit(_run, lang)
+            try:
+                return future.result(timeout=timeout)
+            except concurrent.futures.TimeoutError:
+                raise RuntimeError(
+                    f"Whisper transcription timed out after {timeout}s"
+                )
+
         if forced_lang:
-            text, segments, detected, prob = _run(forced_lang)
+            text, segments, detected, prob = _run_with_timeout(forced_lang)
             score = _score_result(text, segments)
             print(f"[STT] forced={forced_lang} score={score:.2f} text={text[:80]!r}")
         else:
             # 1) Auto-detect once (best when audio is clean)
-            text, segments, detected, prob = _run(None)
+            text, segments, detected, prob = _run_with_timeout(None)
             score = _score_result(text, segments)
             print(
                 f"[STT] auto={detected} p={prob:.2f} score={score:.2f} text={text[:80]!r}"
@@ -174,7 +189,7 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
                     ("en",) if detected == "bn" else ("bn",)
                 )
                 for alt in alts:
-                    alt_text, alt_segs, alt_det, alt_prob = _run(alt)
+                    alt_text, alt_segs, alt_det, alt_prob = _run_with_timeout(alt)
                     alt_score = _score_result(alt_text, alt_segs)
                     print(
                         f"[STT] retry={alt_det} p={alt_prob:.2f} "

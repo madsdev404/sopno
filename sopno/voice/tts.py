@@ -1,6 +1,6 @@
 """
 sopno/voice/tts.py
-━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 Text-to-Speech engine with automatic fallback.
 
 Priority:
@@ -16,7 +16,13 @@ import os
 import re
 import subprocess
 import tempfile
+import concurrent.futures
 from typing import Callable, Optional
+
+from sopno.config.settings import settings
+
+# Shared pool for TTS synthesis timeouts.
+_TTS_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tts")
 
 # ── Engine detection ───────────────────────────────────────────────────────────
 try:
@@ -51,7 +57,10 @@ def _play_audio(
         on_play_start()
 
     if should_stop is None:
-        proc.wait()
+        try:
+            proc.wait(timeout=30)
+        except subprocess.TimeoutExpired:
+            proc.kill()
         return
 
     while proc.poll() is None:
@@ -87,8 +96,14 @@ def _speak_coqui(
         tmp_path = tmp.name
 
     try:
-        _coqui_instance.tts_to_file(text=text, file_path=tmp_path)
+        # Coqui synthesis can be slow on CPU — enforce timeout via thread.
+        future = _TTS_EXECUTOR.submit(
+            _coqui_instance.tts_to_file, text=text, file_path=tmp_path
+        )
+        future.result(timeout=settings.tts_timeout)
         _play_audio(tmp_path, should_stop=should_stop, on_play_start=on_play_start)
+    except concurrent.futures.TimeoutError:
+        print(f"[TTS] Coqui synthesis timed out after {settings.tts_timeout}s.")
     finally:
         try:
             os.remove(tmp_path)
@@ -110,7 +125,7 @@ def _speak_gtts(
         tmp_path = tmp.name
 
     try:
-        gTTS(text=text, lang=lang).save(tmp_path)
+        gTTS(text=text, lang=lang, timeout=settings.tts_timeout).save(tmp_path)
         _play_audio(tmp_path, should_stop=should_stop, on_play_start=on_play_start)
     finally:
         try:

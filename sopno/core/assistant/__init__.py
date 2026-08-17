@@ -666,6 +666,7 @@ class SopnoAssistant:
                 break
             except Exception as e:
                 self.on_log_message(f"Unexpected loop exception: {e}")
+                self.on_status_changed("listening")
                 time.sleep(1)
 
         self.on_status_changed("standby")

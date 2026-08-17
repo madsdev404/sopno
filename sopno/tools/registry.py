@@ -1,13 +1,19 @@
 """
 sopno/tools/registry.py
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 Central tools registry.
 
 Maps the tool names declared in TOOLS_SCHEMA to their actual Python function
 implementations, providing a clean execution interface.
 """
 
+import concurrent.futures
 from typing import Callable, Any
+
+from sopno.config.settings import settings
+
+# Shared pool for tool execution timeouts — one worker prevents thread bloat.
+_EXECUTOR = concurrent.futures.ThreadPoolExecutor(max_workers=1, thread_name_prefix="tool")
 
 from sopno.tools.builtins.system.system import (
     open_application,
@@ -231,11 +237,14 @@ def execute_tool(name: str, arguments: dict[str, Any]) -> str:
     if not func:
         return f"Error: Tool '{name}' is not registered."
 
+    timeout = settings.tool_timeout
+
     try:
-        # Call the tool function spreading the arguments dict
-        return func(**arguments)
+        future = _EXECUTOR.submit(func, **arguments)
+        return future.result(timeout=timeout)
+    except concurrent.futures.TimeoutError:
+        return f"Error: Tool '{name}' timed out after {timeout}s."
     except TypeError as te:
-        # Handle mismatched argument signatures gracefully
         return f"Error: Invalid arguments for tool '{name}' — {te}"
     except Exception as e:
         return f"Error executing tool '{name}': {e}"

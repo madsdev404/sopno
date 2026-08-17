@@ -33,6 +33,16 @@ class Settings:
         self.llm_num_predict: int   = int(data.get("llm_num_predict", 120))
         self.llm_num_ctx: int       = int(data.get("llm_num_ctx", 2048))
         self.llm_temperature: float = float(data.get("llm_temperature", 0.6))
+        # Max seconds to wait for Ollama to respond before aborting the turn.
+        self.llm_timeout: int = int(data.get("llm_timeout", 60))
+
+        # ── Timeouts ──────────────────────────────────────────
+        # Max seconds for a single tool execution before aborting.
+        self.tool_timeout: int = int(data.get("tool_timeout", 60))
+        # Max seconds for TTS synthesis (gTTS HTTP or Coqui inference).
+        self.tts_timeout: int = int(data.get("tts_timeout", 15))
+        # Max seconds for Whisper STT transcription before aborting.
+        self.stt_timeout: int = int(data.get("stt_timeout", 30))
 
         # ── STT ───────────────────────────────────────────────
         # tiny = fast but inaccurate; base = good CPU default; small = better Bangla
@@ -77,9 +87,9 @@ class Settings:
         self.barge_in_baseline_s: float = float(data.get("barge_in_baseline_s", 0.4))
         # User speech must exceed own_voice * multiplier + margin to count.
         self.barge_in_multiplier: float = float(data.get("barge_in_multiplier", 1.7))
-        self.barge_in_margin: float = float(data.get("barge_in_margin", 30))
+        self.barge_in_margin: float = float(data.get("barge_in_margin", 50))
         # How long user speech must persist before interrupting (debounce).
-        self.barge_in_confirm_ms: float = float(data.get("barge_in_confirm_ms", 180))
+        self.barge_in_confirm_ms: float = float(data.get("barge_in_confirm_ms", 250))
 
         # ── HUD ───────────────────────────────────────────────
         self.hud_opacity: float     = data.get("hud_opacity", 0.85)

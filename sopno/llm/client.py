@@ -6,6 +6,7 @@ Ollama LLM client wrapper.
 Keeps replies fast for voice:
   - think=False disables Qwen3/R1 hidden reasoning (huge CPU win)
   - num_predict caps spoken reply length
+  - timeout prevents the assistant from hanging forever
 """
 
 from __future__ import annotations
@@ -15,6 +16,16 @@ from typing import Any, Generator, Optional
 import ollama
 
 from sopno.config.settings import settings
+
+# Persistent client with httpx timeout — avoids hangs when Ollama is slow.
+_client: Optional[ollama.Client] = None
+
+
+def _get_client() -> ollama.Client:
+    global _client
+    if _client is None:
+        _client = ollama.Client(timeout=settings.llm_timeout)
+    return _client
 
 
 def _chat_options() -> dict[str, Any]:
@@ -46,7 +57,7 @@ def chat(
     if not settings.llm_think:
         kwargs["think"] = False
 
-    return ollama.chat(**kwargs)
+    return _get_client().chat(**kwargs)
 
 
 def stream_reply(messages: list[dict]) -> Generator[str, None, None]:

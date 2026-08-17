@@ -49,7 +49,7 @@ class BargeDetector:
         self._floor = floor
         self._multiplier = multiplier
         self._margin = margin
-        self._confirm_frames = max(1, confirm_frames)
+        self._confirm_frames = max(2, confirm_frames)
         self._baseline_frames = max(1, baseline_frames)
 
         self._baseline_sum = 0.0
@@ -106,6 +106,11 @@ class BargeInMonitor:
         self._stop = threading.Event()
         self._measuring = threading.Event()
         self._interrupt = threading.Event()
+        # Direct refs to PyAudio objects so stop() can close them even if
+        # the thread is orphaned (stream.read blocked on some ALSA drivers).
+        self._stream = None
+        self._pa = None
+        self._stream_lock = threading.Lock()
 
         self._baseline_sec = float(getattr(settings, "barge_in_baseline_s", 0.4))
         self._multiplier = float(getattr(settings, "barge_in_multiplier", 1.7))
@@ -129,8 +134,24 @@ class BargeInMonitor:
         self._measuring.set()
 
     def stop(self) -> None:
-        """Stop the mic watcher and wait for the thread to finish."""
+        """Stop the mic watcher and close the audio stream directly."""
         self._stop.set()
+        # Close the stream directly — don't rely on thread join which can
+        # hang if stream.read() is blocked on some ALSA drivers.
+        with self._stream_lock:
+            try:
+                if self._stream is not None:
+                    self._stream.stop_stream()
+                    self._stream.close()
+            except Exception:
+                pass
+            try:
+                if self._pa is not None:
+                    self._pa.terminate()
+            except Exception:
+                pass
+            self._stream = None
+            self._pa = None
         if self._thread is not None:
             self._thread.join(timeout=2.0)
             self._thread = None
@@ -167,6 +188,9 @@ class BargeInMonitor:
         try:
             pa = pyaudio.PyAudio()
             stream, rate = self._open_stream(pa)
+            with self._stream_lock:
+                self._pa = pa
+                self._stream = stream
         except Exception as e:
             self.log(f"Mic unavailable — barge-in disabled ({e}).")
             try:
@@ -198,6 +222,9 @@ class BargeInMonitor:
                     self._interrupt.set()
                     break
         finally:
+            with self._stream_lock:
+                self._stream = None
+                self._pa = None
             try:
                 stream.stop_stream()
                 stream.close()
