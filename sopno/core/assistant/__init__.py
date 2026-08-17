@@ -48,7 +48,14 @@ from sopno.core.assistant.confirm import (
 # Only attach the heavy tool schema when the utterance looks action-oriented.
 # Pure chat without tools is much faster on CPU (seconds vs tens of seconds).
 _TOOLISH = re.compile(
-    r"\b("
+    r"(?:"
+    # Multi-word capability queries
+    r"what can you do|your tool|your capabilit|what do you know|what are you able|"
+    r"what feature|list (your )?feature|tell me what you can|what can sopno|"
+    r"can you (?:do|help|handle|use|access)|how can you help"
+    r"|(?:"
+    # Single-word / short action tokens
+    r"\b(?:"
     r"open|launch|start|close|search|google|volume|mute|unmute|"
     r"play|pause|resume|next|previous|skip|"
     r"time|date|clock|battery|cpu|ram|memory|stats|status|system|"
@@ -59,20 +66,21 @@ _TOOLISH = re.compile(
     r"terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"
     r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
     r"service|cron|log|journal|systemctl|ps aux|list processes|"
-    r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes?|"
+    r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes|note|"
     r"copy|duplicate|move|find|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
     r"remind|reminder|reminders|timer|alert|schedule|remind me|"
-    r"browse|browser|open (a )?website|go to website|navigate|website|webpage|"
-    r"clipboard|copy that|screenshot|screen shot|windows?|focus|type |typing|"
-    r"keyboard|press |keys?|disk|storage|gpu|graphics|network stats|"
+    r"browse|browser|open (?:a )?website|go to website|navigate|website|webpage|"
+    r"clipboard|copy that|screenshot|screen shot|windows|window|focus|type |typing|"
+    r"keyboard|press |keys|key|disk|storage|gpu|graphics|network stats|"
     r"database|sql|query|install|uninstall|package|apt|pacman|pip|flatpak|"
     r"ping|traceroute|wifi|firewall|public ip|my ip|"
-    r"email|mail|inbox|calendar|event|meeting|ocr|vision|describe (a )?(image|picture|screenshot)|"
+    r"email|mail|inbox|calendar|event|meeting|ocr|vision|describe (?:a )?(?:image|picture|screenshot)|"
     r"rule|rules|automation|automate|if .* then |"
     r"subagent|delegate|researcher|coder|reviewer|code review|review this|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
-    r"খোল|সার্চ|ভলিউম|সময়|তারিখ|প্লে|পজ|ফাইল|তৈরি|লেখ|মুছ"
-    r")\b",
+    r"code|project|repo|codebase"
+    r")\b)"
+    r")",
     re.IGNORECASE,
 )
 
