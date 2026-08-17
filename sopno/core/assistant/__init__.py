@@ -27,7 +27,7 @@ from sopno.core.reminders import ReminderPoller, ReminderStore, set_store as set
 from sopno.core.rules import RulePoller, RuleStore, set_store as set_rule_store
 from sopno.llm.client import chat as llm_chat, message_as_dict
 from sopno.memory.store import MemoryStore
-from sopno.tools.schema import get_schema
+from sopno.tools.schema import get_schema, get_schema_for
 from sopno.tools.registry import execute_tool
 from sopno.tools.builtins.dev.terminal import _close as close_terminal_shell
 from sopno.tools.builtins.files.files import pending_action, resolve_pending
@@ -551,7 +551,7 @@ class SopnoAssistant:
         try:
             response = llm_chat(
                 chat_messages,
-                tools=get_schema() if use_tools else None,
+                tools=get_schema_for(cmd_text) if use_tools else None,
             )
 
             response_msg = message_as_dict(response["message"])
