@@ -1,11 +1,14 @@
 """
-sopno/core/assistant.py
-━━━━━━━━━━━━━━━━━━━━━━━
+sopno/core/assistant/__init__.py
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Main pipeline orchestrator.
 
 Defines the SopnoAssistant class, which runs the continuous conversation loop:
   Intro (TTS) → Listening (idle VAD) → Thinking → Speaking → Listening again.
 Uses offline Silero VAD for natural turn-taking; stays quiet until the user speaks.
+
+Memory intent parsing lives in ``assistant/memory.py``;
+confirmation patterns live in ``assistant/confirm.py``.
 """
 
 from __future__ import annotations
@@ -33,6 +36,14 @@ from sopno.voice.listener import Listener
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
 from sopno.voice.wakeword import WakeWordDetector
+
+from sopno.core.assistant.memory import parse_memory_intent  # noqa: F401 – public re-export
+from sopno.core.assistant.confirm import (
+    YES_RESPONSES as _YES_RESPONSES,
+    YES_RESPONSES_BN as _YES_RESPONSES_BN,
+    NO_RESPONSES as _NO_RESPONSES,
+    NO_RESPONSES_BN as _NO_RESPONSES_BN,
+)
 
 # Only attach the heavy tool schema when the utterance looks action-oriented.
 # Pure chat without tools is much faster on CPU (seconds vs tens of seconds).
@@ -68,132 +79,6 @@ _TOOLISH = re.compile(
 
 # Brief pause after TTS so the mic does not hear Sopno's own voice as a turn.
 _POST_SPEAK_SETTLE_S = 0.45
-
-
-# ── Memory intent patterns (English + Bangla) ────────────────────────────────# Order of evaluation matters: recall before remember (recall phrases contain
-# "remember"), and remember before forget ("don't forget X" must REMEMBER).
-
-_MEMORY_FORGET_ALL_EN = re.compile(
-    r"\bforget everything\b|\berase\s+(?:all|your|every)\s+(?:memory|memories)\b|"
-    r"\bclear\s+(?:your|all)\s+(?:memory|memories)\b",
-    re.IGNORECASE,
-)
-
-_MEMORY_RECALL_EN = re.compile(
-    r"\bwhat do you remember\b|\bwhat memories\b|\bwhat have you remembered\b|"
-    r"\bdo you remember anything\b|\bwhat did i tell you\b|"
-    r"\bwhat did you remember\b|\btell me what you remember\b",
-    re.IGNORECASE,
-)
-
-_MEMORY_REMEMBER_EN = re.compile(
-    r"\b(?:remember\s+that|remember\s+this|remember|don'?t\s+forget|"
-    r"do\s+not\s+forget|note\s+that|take\s+a\s+note|take\s+note)"
-    r"\s+(?:that\s+)?(?:about\s+)?(.+)$",
-    re.IGNORECASE,
-)
-
-_MEMORY_FORGET_EN = re.compile(
-    r"\bforget\s+(?:that\s+|about\s+)?(.+)$",
-    re.IGNORECASE,
-)
-
-_MEMORY_FORGET_ALL_BN = re.compile(
-    r"(?<!\w)সব\s+ভুলে\s+যাও(?!\w)|(?<!\w)সব\s+ভুলে\s+যেও(?!\w)|"
-    r"(?<!\w)সব\s+মনে\s+থাকা\s+মুছে\s+দাও(?!\w)|"
-    r"(?<!\w)সব\s+মুছে\s+দাও(?!\w)|"
-    r"(?<!\w)মনে\s+থাকা\s+সব\s+মুছে\s+দাও(?!\w)",
-)
-
-_MEMORY_RECALL_BN = re.compile(
-    r"(?<!\w)(?:কী|কি)\s+মনে\s+আছে(?!\w)|(?<!\w)(?:কী|কি)\s+মনে\s+রেখেছ(?!\w)|"
-    r"(?<!\w)(?:কী|কি)\s+মনে\s+রেখেছো(?!\w)|(?<!\w)(?:কী|কি)\s+মনে\s+রেখ(?!\w)|"
-    r"(?<!\w)তুমি\s+(?:কী|কি)\s+মনে\s+(?:রাখো|রাখ)(?!\w)|"
-    r"(?<!\w)(?:কী|কি)\s+জিনিস\s+মনে\s+আছে(?!\w)|"
-    r"(?<!\w)আমার\s+সম্পর্কে\s+(?:কী|কি)\s+মনে\s+আছে(?!\w)",
-)
-
-_MEMORY_REMEMBER_BN = re.compile(
-    r"(?<!\w)(?:মনে\s+রাখো|মনে\s+রাখ|মনে\s+রাখুন|মনে\s+রেখো|মনে\s+রেখ)"
-    r"\s+(?:যে\s+)?(.+)$"
-    r"|(?<!\w)(?:ভুলো\s+না|ভুলে\s+যেও\s+না)\s+(?:যে\s+)?(.+)$"
-)
-
-_MEMORY_FORGET_BN = re.compile(
-    r"(?<!\w)(?:ভুলে\s+যাও|ভুলে\s+যেও|মুছে\s+ফেলো|মনে\s+থেকে\s+মুছে\s+দাও)"
-    r"\s+(?:যে\s+)?(.+)$",
-)
-
-_MEMORY_TOPIC_EN = re.compile(r"\b(?:about|regarding)\s+(.+)$", re.IGNORECASE)
-# Bangla puts the topic BEFORE সম্পর্কে/নিয়ে: "ফ্লাস্ক সম্পর্কে কী মনে আছে"
-_MEMORY_TOPIC_BN = re.compile(r"(.+?)\s+(?:সম্পর্কে|নিয়ে)\s+(?:কী|কি)\s+মনে")
-
-
-def _memory_topic(text: str, is_bn: bool) -> str:
-    """Extract the recall topic from 'what do you remember about <topic>'."""
-    pattern = _MEMORY_TOPIC_BN if is_bn else _MEMORY_TOPIC_EN
-    match = pattern.search(text.strip())
-    if not match:
-        return ""
-    return match.group(1).strip().rstrip("?।.!?")
-
-
-def parse_memory_intent(text: str) -> Optional[tuple[str, str]]:
-    """
-    Detect explicit memory commands via rules (fast path, no LLM call).
-
-    Returns (action, content):
-      ("remember",  fact)    — store this fact
-      ("forget",    target)  — forget a specific memory
-      ("forget_all", "")     — forget everything
-      ("recall",    topic)   — recall memories (topic may be "")
-      None                   — not a memory command
-
-    Evaluation order: forget_all → recall → remember → forget.
-    """
-    if not text:
-        return None
-
-    txt = text.strip()
-    is_bn = bool(re.search(r"[\u0980-\u09FF]", txt))
-
-    if is_bn:
-        if _MEMORY_FORGET_ALL_BN.search(txt):
-            return ("forget_all", "")
-        if _MEMORY_FORGET_BN.search(txt):
-            target = _MEMORY_FORGET_BN.search(txt).group(1).strip().rstrip("?।.!?")
-            return ("forget", target) if target else None
-        if _MEMORY_RECALL_BN.search(txt):
-            return ("recall", _memory_topic(txt, True))
-        if (m := _MEMORY_REMEMBER_BN.search(txt)) is not None:
-            content = (m.group(1) or m.group(2) or "").strip().rstrip("?।.!?")
-            return ("remember", content) if content else None
-    else:
-        if _MEMORY_FORGET_ALL_EN.search(txt):
-            return ("forget_all", "")
-        if _MEMORY_RECALL_EN.search(txt):
-            return ("recall", _memory_topic(txt, False))
-        if (m := _MEMORY_REMEMBER_EN.search(txt)) is not None:
-            content = m.group(1).strip().rstrip("?.!")
-            return ("remember", content) if content else None
-        if (m := _MEMORY_FORGET_EN.search(txt)) is not None:
-            target = m.group(1).strip().rstrip("?.!")
-            return ("forget", target) if target else None
-
-    return None
-
-
-# ── Pending-action confirmation (English + Bangla) ───────────────────────────
-_YES_RESPONSES = re.compile(
-    r"\b(?:yes|yeah|yep|ok|okay|sure|go ahead|do it|proceed|please do|confirm|allow it)\b",
-    re.IGNORECASE,
-)
-_YES_RESPONSES_BN = re.compile(r"(?<!\w)(?:হ্যাঁ|হ্যা|ঠিক আছে|হুম)(?!\w)|করো|করুন|দাও|অনুমতি")
-_NO_RESPONSES = re.compile(
-    r"\b(?:no|nope|nah|cancel|stop|abort|deny|don'?t|do not|refuse|never mind)\b",
-    re.IGNORECASE,
-)
-_NO_RESPONSES_BN = re.compile(r"(?<!\w)(?:না|থামো|থাম|বাতিল|নিষেধ)(?!\w)")
 
 
 class SopnoAssistant:
@@ -582,7 +467,7 @@ class SopnoAssistant:
         # B. Language switches
         bangla_keywords = [
             "speak in bangla", "change to bangla", "talk in bangla",
-            "banglay kotha bolo", "বাংলায় কথা বলো", "বাংলা করো", "বাংলায় বল",
+            "banglay kotha bolo", "বাংলায় কথা বলো", "বাংলা করো", "বাংলায় বল",
         ]
         english_keywords = [
             "speak in english", "change to english", "talk in english",
@@ -591,7 +476,7 @@ class SopnoAssistant:
 
         if any(kw in clean_cmd for kw in bangla_keywords):
             self.context.current_language = "bn"
-            switch_text = "ঠিক আছে, আমি এখন থেকে বাংলায় কথা বলব।"
+            switch_text = "ঠিক আছে, আমি এখন থেকে বাংলায় কথা বলব।"
             self._deliver_reply(switch_text)
             self.context.add_user_message(cmd_text)
             self.context.add_assistant_message(switch_text)
