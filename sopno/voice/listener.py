@@ -65,8 +65,14 @@ class Listener:
         hi = float(settings.energy_threshold_ceiling)
         if hi < lo:
             hi = lo
-        val = float(self.recognizer.energy_threshold)
-        self.recognizer.energy_threshold = max(lo, min(val, hi))
+        old = float(self.recognizer.energy_threshold)
+        clamped = max(lo, min(old, hi))
+        if clamped != old:
+            self.log(
+                f"Energy threshold clamped: {old:.0f} → {clamped:.0f} "
+                f"(range {lo:.0f}–{hi:.0f})"
+            )
+        self.recognizer.energy_threshold = clamped
 
     def _get_mic(self) -> sr.Microphone:
         """Reuse one Microphone so sample rate stays consistent."""
@@ -146,7 +152,16 @@ class Listener:
             f"[need energy > {need:.0f}]"
         )
 
-        timeout = None if max_wait_s <= 0 else float(max_wait_s)
+        # Always enforce a max wait — prevents the loop from hanging forever
+        # when the energy threshold is miscalibrated.  User-provided 0 means
+        # "no limit" but we cap at 30 s to keep the assistant responsive.
+        effective_timeout = (
+            None
+            if max_wait_s <= 0
+            else float(max_wait_s)
+        )
+        _HARD_WAIT_LIMIT = 30.0  # seconds — re-clamp threshold after this
+
         limit = int(max_utterance_s) if max_utterance_s else phrase_time_limit
 
         try:
@@ -160,8 +175,10 @@ class Listener:
                 audio = self._listen_with_level_logs(
                     source,
                     running_check=running_check,
-                    timeout=timeout,
+                    timeout=effective_timeout,
                     phrase_time_limit=limit,
+                    on_speech_start=on_speech_start,
+                    hard_wait_limit=_HARD_WAIT_LIMIT,
                 )
             if audio is None:
                 return None
@@ -169,10 +186,11 @@ class Listener:
                 audio.sample_rate * audio.sample_width or 1
             )
             self.log(f"Turn captured (~{duration:.1f}s @ {audio.sample_rate} Hz).")
-            if on_speech_start:
-                on_speech_start()
             return audio
         except sr.WaitTimeoutError:
+            # Threshold was probably too high — re-clamp and try next turn.
+            self.log("Wait timed out — threshold may be too high. Re-clamping.")
+            self._clamp_energy()
             return None
         except Exception as e:
             self.log(f"Classic listen failed: {e}")
@@ -185,6 +203,8 @@ class Listener:
         running_check: Optional[Callable[[], bool]],
         timeout: Optional[float],
         phrase_time_limit: int,
+        on_speech_start: Optional[Callable[[], None]] = None,
+        hard_wait_limit: float = 30.0,
     ) -> Optional[sr.AudioData]:
         """
         Like Recognizer.listen, but periodically logs mic RMS so a deaf
@@ -197,11 +217,22 @@ class Listener:
         last_log = 0.0
         peak = 0
         frames: list[bytes] = []
+        _speech_fired = False
 
         # ── wait for speech start ─────────────────────────────────────
         while True:
             if running_check is not None and not running_check():
                 return None
+            # Hard limit: even with max_wait_s=0, bail after 30s to avoid
+            # an infinite hang when the energy threshold is miscalibrated.
+            if elapsed > hard_wait_limit:
+                self.log(
+                    f"No speech detected after {hard_wait_limit:.0f}s — "
+                    f"threshold may be too high (>{self.recognizer.energy_threshold:.0f})."
+                )
+                raise sr.WaitTimeoutError(
+                    f"no speech after {hard_wait_limit:.0f}s"
+                )
             if timeout is not None and elapsed > timeout:
                 raise sr.WaitTimeoutError("listening timed out while waiting for phrase to start")
 
@@ -222,6 +253,11 @@ class Listener:
 
             if energy > self.recognizer.energy_threshold:
                 frames.append(buffer)
+                # Fire speech-start callback immediately so the UI can
+                # show "processing" instead of stuck on "listening".
+                if on_speech_start is not None and not _speech_fired:
+                    _speech_fired = True
+                    on_speech_start()
                 break
 
         if not frames:

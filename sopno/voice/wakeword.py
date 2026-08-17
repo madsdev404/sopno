@@ -166,7 +166,15 @@ class WakeWordDetector:
                     return True
 
             except sr.UnknownValueError:
-                # Silently ignore un-decodable audio / background noise
+                # Whisper couldn't decode — too quiet, too short, or noise.
+                # Only log periodically to avoid log spam.
+                self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
+                if self._ww_fail_count % 5 == 1:
+                    self.log(
+                        f"Wake word not recognized "
+                        f"({self._ww_fail_count} attempts). "
+                        f"Speak clearly after the prompt."
+                    )
                 continue
             except Exception as e:
                 time.sleep(0.5)
