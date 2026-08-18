@@ -56,25 +56,33 @@ def _paint_icon(kind: str, size: int = 36, color: QColor | None = None, active: 
         p.setBrush(color)
         p.setPen(Qt.NoPen)
         p.drawPath(path)
-    elif kind in ("size-small", "size-medium", "size-full"):
-        # Same outer frame for equal optical weight (VS Code toolbar density)
-        box = QRectF(cx - s * 0.32, cy - s * 0.28, s * 0.64, s * 0.56)
-        r = s * 0.08
-        p.drawRoundedRect(box, r, r)
-        if kind == "size-medium":
-            # Mid divider — denser content, same footprint
-            mid = box.center().y()
-            p.drawLine(
-                QPointF(box.left() + s * 0.10, mid),
-                QPointF(box.right() - s * 0.10, mid),
-            )
-        elif kind == "size-full":
-            # Title-bar hairline (maximize)
-            y = box.top() + s * 0.15
-            p.drawLine(
-                QPointF(box.left() + s * 0.08, y),
-                QPointF(box.right() - s * 0.08, y),
-            )
+    elif kind == "minimize":
+        # Horizontal line (minimize to taskbar)
+        y = cy + 1
+        p.drawLine(QPointF(cx - 4, y), QPointF(cx + 4, y))
+    elif kind == "maximize":
+        # Full square (maximize)
+        box = QRectF(cx - 5, cy - 5, 10, 10)
+        p.drawRoundedRect(box, 1.5, 1.5)
+    elif kind == "restore":
+        # Overlapping squares (restore from maximize)
+        box1 = QRectF(cx - 3, cy - 5, 8, 8)
+        box2 = QRectF(cx - 5, cy - 3, 8, 8)
+        p.drawRoundedRect(box1, 1.5, 1.5)
+        p.drawRoundedRect(box2, 1.5, 1.5)
+    elif kind == "half":
+        # Vertical split (half view)
+        box = QRectF(cx - 6, cy - 5, 12, 10)
+        p.drawRoundedRect(box, 1.5, 1.5)
+        p.drawLine(QPointF(cx, cy - 5), QPointF(cx, cy + 5))
+    elif kind == "close":
+        # X (close)
+        p.drawLine(QPointF(cx - 3.5, cy - 3.5), QPointF(cx + 3.5, cy + 3.5))
+        p.drawLine(QPointF(cx + 3.5, cy - 3.5), QPointF(cx - 3.5, cy + 3.5))
+    elif kind == "hide":
+        # Horizontal line with up arrow (hide to tray)
+        y = cy + 2
+        p.drawLine(QPointF(cx - 3, y), QPointF(cx + 3, y))
 
     p.end()
     return QIcon(pm)

@@ -53,6 +53,8 @@ class SopnoHUDWindow(
         self.interaction_mode = "voice"
         self.current_status = "listening"
         self._listen_hint = "Listening… say something"
+        self._is_maximized = False
+        self._prev_geo = None  # restore geometry after maximize
 
         self.init_ui()
         self.init_tray()
@@ -73,7 +75,6 @@ class SopnoHUDWindow(
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_AlwaysShowToolTips, True)
         self.setMinimumSize(*MIN_SIZE)
-        self.setMaximumSize(*MAX_SIZE)
         self.setMouseTracking(True)
 
         self.central_widget = QWidget(self)
@@ -110,12 +111,8 @@ class SopnoHUDWindow(
         self.context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.context_label.setMaximumHeight(20)
 
-        self._size_btns: dict[str, QPushButton] = {}
-        tips = {
-            "small": "Small panel",
-            "medium": "Medium panel",
-            "full": "Full panel",
-        }
+        # ── Window controls (VS Code style) ───────────────────────────────────
+        self._win_btns: dict[str, QPushButton] = {}
 
         chrome = QHBoxLayout()
         chrome.setSpacing(0)
@@ -123,36 +120,32 @@ class SopnoHUDWindow(
         chrome.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._chrome = chrome
 
-        for key in ("small", "medium", "full"):
-            btn = QPushButton()
-            btn.setFixedSize(22, 22)
-            btn.setIconSize(QSize(14, 14))
-            btn.setCursor(Qt.PointingHandCursor)
-            btn.setFocusPolicy(Qt.NoFocus)
-            btn.setToolTip(tips[key])
-            btn.setIcon(_paint_icon(f"size-{key}", 14, active=False))
-            btn.clicked.connect(lambda _=False, k=key: self.apply_size_preset(k))
-            self._size_btns[key] = btn
-            chrome.addWidget(btn, 0, Qt.AlignVCenter)
-
+        # Hide to tray
         self.hide_btn = self._chrome_btn(
-            "−", "#E8A0BF", "Hide to system tray", size=22, font_size=14,
+            "", "#E8A0BF", "Hide to system tray", size=22, font_size=14,
         )
+        self.hide_btn.setIcon(_paint_icon("hide", 14, active=False))
+        self.hide_btn.setIconSize(QSize(14, 14))
         self.hide_btn.clicked.connect(self.hide_hud)
-
-        self.dashboard_btn = self._chrome_btn(
-            "≡", "#5EC1F5", "Dashboard — settings, memory, tools, logs, models",
-            size=22, font_size=12,
-        )
-        self.dashboard_btn.clicked.connect(self.toggle_dashboard)
-
-        self.close_btn = self._chrome_btn(
-            "×", "#F07178", "Close", size=22, font_size=14,
-        )
-        self.close_btn.clicked.connect(self.close_app)
-
-        chrome.addWidget(self.dashboard_btn, 0, Qt.AlignVCenter)
         chrome.addWidget(self.hide_btn, 0, Qt.AlignVCenter)
+
+        # Maximize / restore
+        self.maximize_btn = self._chrome_btn(
+            "", "#E8EEF7", "Maximize", size=22, font_size=14,
+        )
+        self.maximize_btn.setIcon(_paint_icon("maximize", 14, active=False))
+        self.maximize_btn.setIconSize(QSize(14, 14))
+        self.maximize_btn.clicked.connect(self._toggle_maximize)
+        self._win_btns["maximize"] = self.maximize_btn
+        chrome.addWidget(self.maximize_btn, 0, Qt.AlignVCenter)
+
+        # Close
+        self.close_btn = self._chrome_btn(
+            "", "#F07178", "Close", size=22, font_size=14,
+        )
+        self.close_btn.setIcon(_paint_icon("close", 14, active=False))
+        self.close_btn.setIconSize(QSize(14, 14))
+        self.close_btn.clicked.connect(self.close_app)
         chrome.addWidget(self.close_btn, 0, Qt.AlignVCenter)
 
         header.addWidget(self.context_label, 1)
@@ -210,7 +203,6 @@ class SopnoHUDWindow(
             self.dashboard.setVisible(False)
         except Exception:  # noqa: BLE001
             self.dashboard = None
-            self.dashboard_btn.setVisible(False)
 
         # ── Mode toggle (Voice | Text) ─────────────────────────────────────────
         self.mode_toggle = ModeToggle()
@@ -328,13 +320,26 @@ class SopnoHUDWindow(
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.x() + screen.width() - self.width() - 36, screen.y() + 56)
 
-    def toggle_dashboard(self) -> None:
-        if not self.dashboard:
-            return
-        show = not self.dashboard.isVisible()
-        if show:
-            self.dashboard.refresh()
-        self.dashboard.setVisible(show)
+    def _toggle_maximize(self) -> None:
+        if self._is_maximized:
+            if self._prev_geo:
+                self.setGeometry(self._prev_geo)
+                self._prev_geo = None
+            self._is_maximized = False
+        else:
+            self._prev_geo = self.geometry()
+            screen = QApplication.primaryScreen().availableGeometry()
+            self.setGeometry(screen)
+            self._is_maximized = True
+        self._refresh_win_btns()
+
+    def _refresh_win_btns(self) -> None:
+        """Update maximize button icon to reflect current state."""
+        btn = self._win_btns.get("maximize")
+        if btn:
+            kind = "restore" if self._is_maximized else "maximize"
+            ic = getattr(self, "_metrics", {}).get("icon", 14)
+            btn.setIcon(_paint_icon(kind, ic, active=False))
 
     def close_app(self) -> None:
         if hasattr(self, "worker") and self.worker:

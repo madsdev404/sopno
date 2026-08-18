@@ -76,7 +76,7 @@ class ResizeMixin:
             if "b" in e:
                 g.setBottom(g.bottom() + delta.y())
 
-            # Enforce min/max
+            # Enforce min
             if g.width() < MIN_SIZE[0]:
                 if "l" in e:
                     g.setLeft(g.right() - MIN_SIZE[0])
@@ -87,16 +87,6 @@ class ResizeMixin:
                     g.setTop(g.bottom() - MIN_SIZE[1])
                 else:
                     g.setHeight(MIN_SIZE[1])
-            if g.width() > MAX_SIZE[0]:
-                if "l" in e:
-                    g.setLeft(g.right() - MAX_SIZE[0])
-                else:
-                    g.setWidth(MAX_SIZE[0])
-            if g.height() > MAX_SIZE[1]:
-                if "t" in e:
-                    g.setTop(g.bottom() - MAX_SIZE[1])
-                else:
-                    g.setHeight(MAX_SIZE[1])
 
             self.setGeometry(g)
             self.size_mode = "custom"

@@ -2,7 +2,7 @@
 
 All project docs live here, organized to mirror the codebase layout.
 
-## Getting started
+## Getting Started
 
 | Doc | Description |
 |-----|-------------|
@@ -25,6 +25,17 @@ All project docs live here, organized to mirror the codebase layout.
 |-----|-------------|
 | [features.md](roadmap/features.md) | Complete feature vision and capability reference |
 | [status.md](roadmap/status.md) | Incremental progress tracker |
+| [implementation-plan.md](roadmap/implementation-plan.md) | Step-by-step implementation plan |
+| [long-running-agents.md](roadmap/long-running-agents.md) | Background agent system design |
+| [autonomous-coding.md](roadmap/autonomous-coding.md) | Autonomous coding agent design |
+| [MATURITY.md](roadmap/MATURITY.md) | **Maturity roadmap** — how to make Sopno as polished as Cursor/AntiGravity |
+
+## HUD (Graphical Interface)
+
+| Doc | Description |
+|-----|-------------|
+| [DESIGN.md](hud/DESIGN.md) | **Visual design guide** — colors, glassmorphism, glow effects, component specs, full CSS theme |
+| [PYWEBVIEW.md](hud/PYWEBVIEW.md) | **Implementation guide** — pywebview setup, Python bridge, HTML/CSS/JS frontend, assistant integration |
 
 ## Modules
 
@@ -36,18 +47,41 @@ Docs for specific packages (mirrors `sopno/`):
 | memory | [memory.md](modules/memory/memory.md) |
 | internet | [internet.md](modules/internet/internet.md) |
 
+## Agents
+
+| Doc | Description |
+|-----|-------------|
+| [agent-implementation.md](agen/agent-implementation.md) | Multi-agent system implementation guide |
+
 ---
 
-**Layout**
+## Layout
 
 ```
 doc/
 ├── README.md                 ← you are here
 ├── getting-started/
+│   ├── installation.md
+│   └── user-guide.md
 ├── architecture/
+│   ├── overview.md
+│   ├── code-organization.md
+│   ├── observations.md
+│   └── project-assessment.md
 ├── roadmap/
-└── modules/
-    ├── voice/
-    ├── memory/
-    └── internet/
+│   ├── features.md
+│   ├── status.md
+│   ├── implementation-plan.md
+│   ├── long-running-agents.md
+│   ├── autonomous-coding.md
+│   └── MATURITY.md
+├── hud/
+│   ├── DESIGN.md
+│   └── PYWEBVIEW.md
+├── modules/
+│   ├── voice/
+│   ├── memory/
+│   └── internet/
+└── agen/
+    └── agent-implementation.md
 ```

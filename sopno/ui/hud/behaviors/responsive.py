@@ -10,7 +10,7 @@ from PyQt5.QtWidgets import QApplication
 
 from sopno.config.settings import settings
 from sopno.ui.hud.visuals.icons import _paint_icon
-from sopno.ui.hud.visuals.theme import SIZE_PRESETS, _CHROME, _TOOL_ICON
+from sopno.ui.hud.visuals.theme import SIZE_PRESETS, _CHROME
 
 
 class ResponsiveMixin:
@@ -73,7 +73,7 @@ class ResponsiveMixin:
 
         c = m["chrome"]
         ic = m["icon"]
-        for key, btn in self._size_btns.items():
+        for key, btn in self._win_btns.items():
             btn.setFixedSize(c, c)
             btn.setIconSize(QSize(ic, ic))
 
@@ -82,9 +82,10 @@ class ResponsiveMixin:
             (self.close_btn, "#F07178"),
         ):
             btn.setFixedSize(c, c)
+            btn.setIconSize(QSize(ic, ic))
             btn.setStyleSheet(_CHROME.format(hover=hover, font_size=m["chrome_font"]))
 
-        self._refresh_size_chips()
+        self._refresh_win_btns()
 
         # Robot + status
         self.robot.set_face_size(m["face"])
@@ -123,15 +124,6 @@ class ResponsiveMixin:
                 border-radius: {max(12, m['mode_r'])}px;
             }}
         """)
-
-    def _refresh_size_chips(self) -> None:
-        ic = getattr(self, "_metrics", {}).get("icon", 14)
-        for key, btn in self._size_btns.items():
-            on = key == self.size_mode
-            btn.setIcon(_paint_icon(f"size-{key}", ic, active=on))
-            btn.setStyleSheet(_TOOL_ICON.format(
-                bg="rgba(94, 177, 245, 0.14)" if on else "transparent",
-            ))
 
     def apply_size_preset(self, mode: str, *, anchor_top_right: bool = False) -> None:
         mode = mode if mode in SIZE_PRESETS else "medium"
