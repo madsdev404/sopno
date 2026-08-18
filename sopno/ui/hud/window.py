@@ -19,6 +19,7 @@ from PyQt5.QtWidgets import (
     QLineEdit,
     QMainWindow,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QVBoxLayout,
     QWidget,
@@ -29,7 +30,7 @@ from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, St
 from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE
-from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle
+from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle, VoiceModeOrb
 from sopno.ui.hud.worker import AssistantWorker
 
 
@@ -72,7 +73,6 @@ class SopnoHUDWindow(
         self.thread.start()
 
     def _init_shortcuts(self) -> None:
-        """Keyboard shortcuts for common actions."""
         from PyQt5.QtWidgets import QShortcut
         QShortcut(QKeySequence("Ctrl+Q"), self, self.close_app)
         QShortcut(QKeySequence("Escape"), self, self.hide_hud)
@@ -110,7 +110,7 @@ class SopnoHUDWindow(
         root.setSpacing(0)
         self._root = root
 
-        # ── Header (compact chrome) ───────────────────────────────────────────
+        # ── Header (always visible) ───────────────────────────────────────────
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
@@ -122,7 +122,7 @@ class SopnoHUDWindow(
         self.context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.context_label.setMaximumHeight(20)
 
-        # ── Window controls (VS Code style) ───────────────────────────────────
+        # ── Window controls ───────────────────────────────────────────────────
         self._win_btns: dict[str, QPushButton] = {}
 
         chrome = QHBoxLayout()
@@ -161,26 +161,18 @@ class SopnoHUDWindow(
         root.addLayout(header)
         root.addSpacing(4)
 
-        # ── Robot stage ───────────────────────────────────────────────────────
-        stage = QVBoxLayout()
-        stage.setSpacing(2)
-        stage.setAlignment(Qt.AlignCenter)
-        self._stage = stage
+        # ── Voice mode stage ──────────────────────────────────────────────────
+        self.voice_stage = QFrame()
+        self.voice_stage.setObjectName("VoiceStage")
+        self.voice_stage.setStyleSheet("QFrame#VoiceStage { background: transparent; }")
+        self.voice_stage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        voice_layout = QVBoxLayout(self.voice_stage)
+        voice_layout.setContentsMargins(0, 0, 0, 0)
+        voice_layout.setSpacing(4)
 
-        self.robot = AliveRobotFace(size=100)
-
-        # Status row: label + listening mode chip
-        status_row = QHBoxLayout()
-        status_row.setAlignment(Qt.AlignCenter)
-        status_row.setSpacing(6)
-        self._status_row = status_row
-
-        self.status_label = QLabel("Idle")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setFont(QFont("IBM Plex Sans", 9, QFont.Medium))
-        self.status_label.setStyleSheet(
-            "color: #8B9BB4; background: transparent; letter-spacing: 0.5px;"
-        )
+        self.voice_orb = VoiceModeOrb(size=300)
+        self.voice_orb.setVisible(False)
+        voice_layout.addWidget(self.voice_orb, 1)
 
         self.listening_chip = QPushButton()
         self.listening_chip.setCursor(Qt.PointingHandCursor)
@@ -189,22 +181,84 @@ class SopnoHUDWindow(
         self.listening_chip.setToolTip("Click to toggle wake word / always-on")
         self.listening_chip.clicked.connect(self._toggle_listening_mode)
         self._style_listening_chip()
+        voice_layout.addWidget(self.listening_chip, 0, Qt.AlignCenter)
 
-        status_row.addWidget(self.status_label)
-        status_row.addWidget(self.listening_chip)
+        self.listening_chip = QPushButton()
+        self.listening_chip.setCursor(Qt.PointingHandCursor)
+        self.listening_chip.setFocusPolicy(Qt.NoFocus)
+        self.listening_chip.setFixedHeight(18)
+        self.listening_chip.setToolTip("Click to toggle wake word / always-on")
+        self.listening_chip.clicked.connect(self._toggle_listening_mode)
+        self._style_listening_chip()
+        voice_layout.addWidget(self.listening_chip, 0, Qt.AlignCenter)
 
-        stage.addWidget(self.robot, 0, Qt.AlignCenter)
-        stage.addLayout(status_row)
-        root.addLayout(stage)
-        root.addSpacing(8)
+        # ── Compact transcript (voice mode) ───────────────────────────────────
+        self.voice_transcript = QScrollArea()
+        self.voice_transcript.setObjectName("VoiceTranscript")
+        self.voice_transcript.setWidgetResizable(True)
+        self.voice_transcript.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.voice_transcript.setFrameShape(QFrame.NoFrame)
+        self.voice_transcript.setMaximumHeight(80)
+        self.voice_transcript.setStyleSheet("""
+            QScrollArea#VoiceTranscript {
+                background: rgba(255, 255, 255, 0.03);
+                border: 1px solid rgba(255, 255, 255, 0.06);
+                border-radius: 8px;
+            }
+            QScrollBar:vertical {
+                background: transparent;
+                width: 3px;
+            }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.1);
+                border-radius: 1px;
+                min-height: 10px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
+        """)
+        self._transcript_inner = QWidget()
+        self._transcript_inner.setStyleSheet("background: transparent;")
+        self._transcript_col = QVBoxLayout(self._transcript_inner)
+        self._transcript_col.setContentsMargins(8, 4, 8, 4)
+        self._transcript_col.setSpacing(2)
+        self._transcript_col.addStretch(1)
+        self.voice_transcript.setWidget(self._transcript_inner)
+        self._transcript_count = 0
+        self._transcript_max = 10
+        voice_layout.addWidget(self.voice_transcript, 0)
 
-        # ── Clean conversation thread ─────────────────────────────────────────
+        root.addWidget(self.voice_stage, 1)
+
+        # ── Text mode: robot face + chat thread ───────────────────────────────
+        self.text_stage = QFrame()
+        self.text_stage.setObjectName("TextStage")
+        self.text_stage.setStyleSheet("QFrame#TextStage { background: transparent; }")
+        self.text_stage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        text_layout = QVBoxLayout(self.text_stage)
+        text_layout.setContentsMargins(0, 0, 0, 0)
+        text_layout.setSpacing(4)
+        text_layout.setAlignment(Qt.AlignCenter)
+
+        self.robot = AliveRobotFace(size=100)
+        text_layout.addWidget(self.robot, 0, Qt.AlignCenter)
+
+        self.status_label = QLabel("Idle")
+        self.status_label.setAlignment(Qt.AlignCenter)
+        self.status_label.setFont(QFont("IBM Plex Sans", 9, QFont.Medium))
+        self.status_label.setStyleSheet(
+            "color: #8B9BB4; background: transparent; letter-spacing: 0.5px;"
+        )
+        text_layout.addWidget(self.status_label, 0, Qt.AlignCenter)
+
+        root.addWidget(self.text_stage, 1)
+
+        # ── Chat thread (text mode) ───────────────────────────────────────────
         self.chat = ChatThread()
         self.chat.setMinimumHeight(80)
         root.addWidget(self.chat, 1)
-        root.addSpacing(10)
+        root.addSpacing(6)
 
-        # ── Dashboard (toggled via Ctrl+D or tray) ───────────────────────────
+        # ── Dashboard ─────────────────────────────────────────────────────────
         self.dashboard = None
         try:
             self.dashboard = DashboardPanel()
@@ -213,11 +267,11 @@ class SopnoHUDWindow(
         except Exception:  # noqa: BLE001
             self.dashboard = None
 
-        # ── Mode toggle (Voice | Text) ─────────────────────────────────────────
+        # ── Mode toggle (always visible) ──────────────────────────────────────
         self.mode_toggle = ModeToggle()
         self.mode_toggle.mode_changed.connect(self.set_interaction_mode)
         root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
-        root.addSpacing(8)
+        root.addSpacing(6)
 
         # ── Composer (text mode only) ─────────────────────────────────────────
         self.dock = QFrame()
@@ -254,7 +308,7 @@ class SopnoHUDWindow(
         dock_row.addWidget(self.text_input, 1)
         dock_row.addWidget(self.send_btn, 0, Qt.AlignVCenter)
         root.addWidget(self.dock)
-        root.addSpacing(6)
+        root.addSpacing(4)
 
         self.log_display = QLabel("Starting…")
         self.log_display.setAlignment(Qt.AlignCenter)
@@ -263,7 +317,6 @@ class SopnoHUDWindow(
         self.log_display.setWordWrap(True)
         root.addWidget(self.log_display)
 
-        # Resize grip hint (bottom-right)
         grip_row = QHBoxLayout()
         grip_row.addStretch(1)
         self.resize_hint = QLabel("⋰")
@@ -276,32 +329,41 @@ class SopnoHUDWindow(
         self.setCentralWidget(self.central_widget)
         self.apply_size_preset("medium", anchor_top_right=True)
         self._style_listening_chip()
-        self._apply_mode_layout()
         self.position_hud()
+
+    def showEvent(self, _event) -> None:
+        super().showEvent(_event)
+        self._apply_mode_layout()
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive()
 
     def keyPressEvent(self, event) -> None:
-        """Route Enter/Return from text_input (already handled by returnPressed)."""
         super().keyPressEvent(event)
 
     def _apply_mode_layout(self) -> None:
-        """Show/hide elements based on voice vs text mode."""
         is_text = self.interaction_mode == "text"
         self.dock.setVisible(is_text)
         self.listening_chip.setVisible(not is_text)
         self.mode_toggle.set_mode(self.interaction_mode, emit=False)
 
         if is_text:
-            self.robot.set_face_size(56)
+            self.voice_stage.setVisible(False)
+            self.text_stage.setVisible(True)
+            self.chat.setVisible(True)
+            self.voice_transcript.setVisible(False)
             self.context_label.setText("Type a message")
             self.text_input.setFocus()
         else:
+            self.voice_stage.setVisible(True)
+            self.voice_orb.setVisible(True)
+            self.text_stage.setVisible(False)
+            self.chat.setVisible(False)
+            self.voice_transcript.setVisible(True)
             m = getattr(self, "_metrics", None)
-            face_size = m["face"] if m else 100
-            self.robot.set_face_size(face_size)
+            face_size = m["face"] if m else 110
+            self.voice_orb.face.set_face_size(face_size)
             if self.current_status in ("standby", "listening"):
                 if self.current_status == "standby" and getattr(settings, "listening_mode", "wake_word") == "wake_word":
                     wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
@@ -334,8 +396,37 @@ class SopnoHUDWindow(
             else:
                 self.context_label.setText(self._listen_hint)
 
+    def _add_transcript_line(self, role: str, text: str) -> None:
+        """Add a compact line to the voice mode transcript."""
+        text = (text or "").strip()
+        if not text:
+            return
+        label = QLabel(text)
+        label.setWordWrap(True)
+        label.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        label.setMaximumHeight(32)
+        label.setFont(QFont("IBM Plex Sans", 7))
+        if role == "user":
+            label.setStyleSheet("color: #6EA8D8; background: transparent;")
+            label.setText(f"▸ {text}")
+        else:
+            label.setStyleSheet("color: #9AAABF; background: transparent;")
+            label.setText(f"● {text}")
+
+        self._transcript_col.insertWidget(self._transcript_col.count() - 1, label)
+        self._transcript_count += 1
+
+        while self._transcript_count > self._transcript_max and self._transcript_col.count() > 1:
+            item = self._transcript_col.takeAt(0)
+            w = item.widget()
+            if w:
+                w.deleteLater()
+                self._transcript_count -= 1
+
+        bar = self.voice_transcript.verticalScrollBar()
+        bar.setValue(bar.maximum())
+
     def _toggle_dashboard(self) -> None:
-        """Toggle dashboard panel visibility."""
         if self.dashboard is None:
             return
         visible = not self.dashboard.isVisible()

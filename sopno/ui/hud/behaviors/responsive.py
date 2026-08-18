@@ -96,6 +96,9 @@ class ResponsiveMixin:
         self._refresh_win_btns()
 
         self.robot.set_face_size(m["face"])
+        if hasattr(self, "voice_orb") and self.voice_orb:
+            face = m["face"]
+            self.voice_orb.face.set_face_size(face)
         self.status_label.setVisible(m["show_status"])
         self.status_label.setFont(QFont("IBM Plex Sans", m["status_pt"], QFont.Medium))
         self.log_display.setVisible(m["show_log"])

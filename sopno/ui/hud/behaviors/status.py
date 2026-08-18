@@ -17,6 +17,8 @@ class StatusMixin:
         status_clean = status.lower().strip()
         self.current_status = status_clean if status_clean in STATUS_COPY else "standby"
         self.robot.set_state(self.current_status)
+        if hasattr(self, "voice_orb") and self.voice_orb:
+            self.voice_orb.set_state(self.current_status)
 
         label, color = STATUS_COPY[self.current_status]
         self.status_label.setText(label)
@@ -47,9 +49,13 @@ class StatusMixin:
 
     def update_user_speech(self, text: str) -> None:
         self.chat.add_message("user", text)
+        if hasattr(self, "_add_transcript_line"):
+            self._add_transcript_line("user", text)
 
     def update_sopno_reply(self, text: str) -> None:
         self.chat.add_message("assistant", text)
+        if hasattr(self, "_add_transcript_line"):
+            self._add_transcript_line("assistant", text)
 
     def update_log(self, log: str) -> None:
         short = log if len(log) < 64 else log[:61] + "…"

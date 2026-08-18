@@ -105,7 +105,11 @@ class AliveRobotFace(QWidget):
         self.update()
 
     def paintEvent(self, _event) -> None:
+        if not self.isVisible() or self.width() < 10:
+            return
         p = QPainter(self)
+        if not p.isActive():
+            return
         p.setRenderHint(QPainter.Antialiasing)
 
         w, h = self.width(), self.height()
