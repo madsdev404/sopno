@@ -133,7 +133,13 @@ class BargeInMonitor:
         self._thread.start()
 
     def start_measurement(self) -> None:
-        """Start learning the own-voice baseline (call once playback starts)."""
+        """Start learning the own-voice baseline (call once playback starts).
+
+        Flushes stale pre-playback audio from the shared buffer so the baseline
+        is learned from actual TTS output, not old ambient noise.
+        """
+        if self._mic_stream is not None:
+            self._mic_stream.flush()
         self._measuring.set()
 
     def stop(self) -> None:
@@ -144,9 +150,9 @@ class BargeInMonitor:
             self._thread = None
 
     def _run(self) -> None:
-        """Read frames from the shared MicStream and detect barge-in."""
+        """Read frames from the shared mic stream and detect barge-in."""
         if self._mic_stream is None:
-            self.log("No MicStream — barge-in disabled.")
+            self.log("No MicStream attached — barge-in disabled.")
             return
 
         rate = self._mic_stream.rate
@@ -161,7 +167,7 @@ class BargeInMonitor:
 
         while not self._stop.is_set():
             try:
-                chunk = self._mic_stream.read_blocking(1024, timeout_s=0.5)
+                chunk = self._mic_stream.read(1024, timeout_s=0.5)
             except Exception:
                 break
             if not chunk:

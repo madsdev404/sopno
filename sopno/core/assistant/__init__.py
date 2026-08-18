@@ -36,7 +36,7 @@ from sopno.voice.listener import Listener
 from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
-from sopno.voice.wakeword import WakeWordDetector
+from sopno.voice.wakeword import WakeWordDetector, dynamic_greeting
 
 from sopno.core.assistant.memory import parse_memory_intent  # noqa: F401 – public re-export
 from sopno.core.assistant.confirm import (
@@ -262,7 +262,7 @@ class SopnoAssistant:
             )
         finally:
             monitor.stop()
-            # Flush stale audio from the ring buffer so the listener
+            # Flush stale audio from the shared buffer so the listener
             # doesn't pick up Sopno's own voice from the speakers.
             self.mic_stream.flush()
         return monitor.interrupted
@@ -280,6 +280,8 @@ class SopnoAssistant:
                 if not barge_in:
                     from sopno.voice.tts import speak
                     speak(text)
+                    # Flush stale TTS audio captured by mic through speakers
+                    self.mic_stream.flush()
                 time.sleep(_POST_SPEAK_SETTLE_S)
             else:
                 # Text mode: brief "speaking" flash for avatar, no TTS
@@ -633,8 +635,9 @@ class SopnoAssistant:
         vad_note = "Silero VAD" if self.listener.turn_taker.available else "classic listen"
         self.on_log_message(f"Sound system ready ({vad_note} turn-taking).")
 
-        # Welcome message — no barge-in needed (nobody is speaking yet).
-        welcome_text = "Hello! I'm Sopno. I'm listening whenever you're ready."
+        # Welcome message — dynamic, time-based greeting.
+        welcome_text = dynamic_greeting()
+        self.on_log_message(f"Intro: '{welcome_text}'")
         self._deliver_reply(welcome_text, barge_in=False)
         initial_status = "standby" if self.listening_mode == "wake_word" else "listening"
         self.on_status_changed(initial_status)

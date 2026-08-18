@@ -1,17 +1,15 @@
 """
 sopno/voice/listener.py
-━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━
 Microphone capture and ambient-noise calibration.
 
 Uses the shared MicStream (sounddevice) for audio capture — no PyAudio.
-This eliminates the device open/close race that caused segfaults when
-PyAudio (listener) and sounddevice (barge-in) competed for the mic.
+Reads directly from the single shared buffer (no fan-out readers).
 """
 
 from __future__ import annotations
 
 import audioop
-import struct
 import sys
 import time
 from typing import Callable, Optional
@@ -60,7 +58,6 @@ class Listener:
         self.recognizer.non_speaking_duration = min(0.5, settings.pause_threshold * 0.4)
         self.turn_taker = TurnTaker(log_callback=self.log, mic_stream=mic_stream)
         self._mic_stream: Optional[MicStream] = mic_stream
-        self._last_barge_close: float = 0.0  # set by assistant after barge-in
 
     def set_mic_stream(self, stream: MicStream) -> None:
         """Attach the shared mic stream (called by assistant before calibrate)."""
@@ -99,18 +96,16 @@ class Listener:
 
             frames_read = 0
             while frames_read < total_frames:
-                chunk = self._mic_stream.read_blocking(chunk_size)
+                chunk = self._mic_stream.read(chunk_size)
                 if not chunk:
                     time.sleep(0.01)
                     continue
-                # chunk is int16 mono bytes — compute RMS energy
                 energy = audioop.rms(chunk, 2)
                 energies.append(energy)
                 frames_read += len(chunk) // (self._mic_stream.channels * self._mic_stream.sample_width)
 
             if energies:
                 avg_energy = sum(energies) / len(energies)
-                # Set threshold to ~2x ambient noise (standard SR calibration)
                 self.recognizer.energy_threshold = max(
                     float(settings.energy_threshold_floor),
                     avg_energy * 2.0,
@@ -142,7 +137,7 @@ class Listener:
         phrase_count = 0
 
         while phrase_count < phrase_limit:
-            chunk = self._mic_stream.read_blocking(chunk_size)
+            chunk = self._mic_stream.read(chunk_size)
             if not chunk:
                 break
             frames.append(chunk)
@@ -199,6 +194,9 @@ class Listener:
         if self._mic_stream is None:
             self.log("No MicStream attached — cannot listen.")
             return None
+
+        # Flush stale audio from previous turn (TTS playback etc.)
+        self._mic_stream.flush()
 
         need = float(self.recognizer.energy_threshold)
         self.log(
@@ -266,7 +264,7 @@ class Listener:
             if timeout is not None and elapsed > timeout:
                 raise sr.WaitTimeoutError("listening timed out while waiting for phrase to start")
 
-            chunk = self._mic_stream.read_blocking(chunk_size)
+            chunk = self._mic_stream.read(chunk_size)
             if not chunk:
                 break
             elapsed += seconds_per_buffer
@@ -305,7 +303,7 @@ class Listener:
             if phrase_time_limit and phrase_elapsed > phrase_time_limit:
                 break
 
-            chunk = self._mic_stream.read_blocking(chunk_size)
+            chunk = self._mic_stream.read(chunk_size)
             if not chunk:
                 break
             frames.append(chunk)

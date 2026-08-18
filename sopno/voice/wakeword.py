@@ -1,25 +1,71 @@
 """
 sopno/voice/wakeword.py
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 Wake-word detection engine.
 
 Leverages 'sherpa-onnx' for fast, offline, low-latency wake-word spotting (KWS).
-If sherpa-onnx or pvrecorder are unavailable, it falls back gracefully to a
-continuous SpeechRecognition-based pattern matching approach.
+If sherpa-onnx is unavailable, it falls back to a continuous STT-based approach.
+
+Both paths read from the shared MicStream (sounddevice) — no PvRecorder,
+no PyAudio, no device conflicts.
 """
 
-import os
 import re
-import sys
 import time
+from datetime import datetime
 from typing import Callable, Optional
 
-import audioop
+import numpy as np
 import speech_recognition as sr
 
 from sopno.config.settings import settings
 from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
+
+
+def dynamic_greeting() -> str:
+    """Return a short, time-appropriate greeting."""
+    hour = datetime.now().hour
+    if hour < 6:
+        period = "night"
+        msg = "Up late?"
+    elif hour < 12:
+        period = "morning"
+        msg = "Hope you slept well"
+    elif hour < 17:
+        period = "afternoon"
+        msg = "Good afternoon"
+    elif hour < 21:
+        period = "evening"
+        msg = "Good evening"
+    else:
+        period = "night"
+        msg = "Working late?"
+
+    greetings = {
+        "morning": [
+            f"Good morning! {msg}. Sopno here, what's on your mind?",
+            f"Morning! {msg}. What can I help with?",
+            f"Hey, good morning. {msg}. What do you need?",
+        ],
+        "afternoon": [
+            f"{msg}. Sopno here, what's up?",
+            f"Hey! {msg}. What can I do for you?",
+            f"Afternoon! What's on your mind?",
+        ],
+        "evening": [
+            f"{msg}. Sopno here, what do you need?",
+            f"Hey, {msg.lower()}. What can I help with?",
+            f"{msg}. What's on your mind?",
+        ],
+        "night": [
+            f"Hey, {msg.lower()}. What do you need?",
+            f"Night owl? Sopno here. What's up?",
+            f"{msg}. What can I help with?",
+        ],
+    }
+    import random
+    return random.choice(greetings[period])
 
 
 class WakeWordDetector:
@@ -42,8 +88,7 @@ class WakeWordDetector:
         if tokens_path.exists() and encoder_path.exists():
             try:
                 import sherpa_onnx
-                
-                # Load tokens to perform greedy BPE tokenization
+
                 tokens = {}
                 with open(tokens_path, "r", encoding="utf-8") as f:
                     for line in f:
@@ -98,131 +143,105 @@ class WakeWordDetector:
                 self.use_sherpa = True
                 self.log(f"sherpa-onnx KWS active. Wake words: {settings.wake_words}")
             except Exception as e:
-                self.log(f"Failed to load sherpa-onnx ({e}). Falling back to continuous SpeechRecognition.")
+                self.log(f"Failed to load sherpa-onnx ({e}). Falling back to STT-based wake word.")
                 self.use_sherpa = False
         else:
-            self.log("sherpa-onnx model files not found. Using continuous SpeechRecognition for wake words.")
+            self.log("sherpa-onnx model files not found. Using STT-based wake word detection.")
 
     def wait_for_wakeword(self, recognizer: sr.Recognizer, running_check: Callable[[], bool],
                           mic_stream: Optional[MicStream] = None) -> bool:
         """
         Blocks until the wake word is spoken.
 
-        Args:
-            recognizer: Shared SpeechRecognition Recognizer instance (for fallback)
-            running_check: A zero-argument function returning False if the assistant should exit
-            mic_stream: Shared MicStream for audio capture (fallback path)
-
-        Returns:
-            True if the wake word was successfully detected, False if exiting.
+        Reads from the shared MicStream — no PvRecorder, no PyAudio.
         """
-        if self.use_sherpa and self.kws is not None:
+        if mic_stream is None:
+            self.log("No MicStream — cannot detect wake word.")
+            return False
+
+        try:
+            if self.use_sherpa and self.kws is not None:
+                return self._detect_sherpa(mic_stream, running_check)
+            else:
+                return self._detect_stt(mic_stream, recognizer, running_check)
+        finally:
+            pass
+
+    def _detect_sherpa(self, mic_stream: MicStream,
+                       running_check: Callable[[], bool]) -> bool:
+        """sherpa-onnx KWS detection using the shared MicStream."""
+        import sherpa_onnx
+
+        self.log("Listening for wake word (sherpa-onnx)…")
+        stream = self.kws.create_stream()
+        chunk_frames = 512  # sherpa-onnx expects 512-sample windows
+
+        try:
+            while running_check():
+                chunk = mic_stream.read(chunk_frames, timeout_s=0.5)
+                if not chunk:
+                    continue
+                # MicStream is 16kHz int16 — perfect for sherpa-onnx
+                samples = np.frombuffer(chunk, dtype=np.int16).astype(np.float32) / 32768.0
+                stream.accept_waveform(mic_stream.rate, samples)
+
+                while self.kws.is_ready(stream):
+                    self.kws.decode_stream(stream)
+
+                result = self.kws.get_result(stream)
+                if result != "":
+                    self.kws.reset_stream(stream)
+                    self.log("Wake word detected!")
+                    return True
+        except Exception as e:
+            self.log(f"sherpa-onnx error: {e}. Falling back to STT-based detection.")
+            return self._detect_stt(mic_stream, None, running_check)
+
+        return False
+
+    def _detect_stt(self, mic_stream: MicStream,
+                    recognizer: Optional[sr.Recognizer],
+                    running_check: Callable[[], bool]) -> bool:
+        """STT-based wake word detection using the shared MicStream."""
+        self.log("Listening for wake word (STT fallback)…")
+
+        while running_check():
             try:
-                from pvrecorder import PvRecorder
-                import numpy as np
+                chunk_size = 1024
+                frames: list[bytes] = []
+                total_frames = 0
+                target_frames = int(mic_stream.rate * 3.0)
 
-                self.log("Listening for wake word (sherpa-onnx)…")
-                recorder = PvRecorder(device_index=-1, frame_length=512)
-                recorder.start()
-                stream = self.kws.create_stream()
-
-                try:
-                    while running_check():
-                        pcm = recorder.read()
-                        samples = np.array(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-                        stream.accept_waveform(16000, samples)
-
-                        while self.kws.is_ready(stream):
-                            self.kws.decode_stream(stream)
-
-                        result = self.kws.get_result(stream)
-                        if result != "":
-                            self.kws.reset_stream(stream)
-                            self.log("Wake word detected!")
-                            return True
-                finally:
-                    try:
-                        recorder.stop()
-                        recorder.delete()
-                    except Exception:
-                        pass
-            except Exception as e:
-                self.log(f"Error in sherpa-onnx stream: {e}. Falling back to SpeechRecognition.")
-                self.use_sherpa = False
-
-        # ── Fallback: Continuous SpeechRecognition check ───────────────────────
-        self.log("Listening for wake word (SpeechRecognition fallback)…")
-
-        # If we have a shared MicStream, read audio from it instead of sr.Microphone.
-        if mic_stream is not None:
-            while running_check():
-                try:
-                    # Read ~3 seconds of audio from the shared stream
-                    chunk_size = 1024
-                    frames: list[bytes] = []
-                    total_frames = 0
-                    target_frames = int(mic_stream.rate * 3.0)  # 3 seconds
-
-                    while total_frames < target_frames and running_check():
-                        chunk = mic_stream.read_blocking(chunk_size, timeout_s=0.5)
-                        if not chunk:
-                            continue
-                        frames.append(chunk)
-                        total_frames += len(chunk) // (mic_stream.channels * mic_stream.sample_width)
-
-                    if not frames:
+                while total_frames < target_frames and running_check():
+                    chunk = mic_stream.read(chunk_size, timeout_s=0.5)
+                    if not chunk:
                         continue
+                    frames.append(chunk)
+                    total_frames += len(chunk) // (mic_stream.channels * mic_stream.sample_width)
 
-                    audio = sr.AudioData(b"".join(frames), mic_stream.rate, mic_stream.sample_width)
-                    text = transcribe(recognizer, audio)
-                    self.log(f"Heard: '{text}'")
-                    text_lower = text.lower().strip()
-
-                    if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
-                        self.log("Wake word detected!")
-                        return True
-
-                except sr.UnknownValueError:
-                    self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
-                    if self._ww_fail_count % 5 == 1:
-                        self.log(
-                            f"Wake word not recognized "
-                            f"({self._ww_fail_count} attempts). "
-                            f"Speak clearly after the prompt."
-                        )
+                if not frames:
                     continue
-                except Exception as e:
-                    time.sleep(0.5)
-                    continue
-        else:
-            # Legacy fallback with sr.Microphone (PyAudio) — only if no MicStream
-            while running_check():
-                try:
-                    with sr.Microphone() as source:
-                        try:
-                            audio = recognizer.listen(source, timeout=3.0, phrase_time_limit=3.0)
-                        except sr.WaitTimeoutError:
-                            continue
 
-                    text = transcribe(recognizer, audio)
-                    self.log(f"Heard: '{text}'")
-                    text_lower = text.lower().strip()
+                audio = sr.AudioData(b"".join(frames), mic_stream.rate, mic_stream.sample_width)
+                text = transcribe(recognizer, audio)
+                self.log(f"Heard: '{text}'")
+                text_lower = text.lower().strip()
 
-                    if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
-                        self.log("Wake word detected!")
-                        return True
+                if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
+                    self.log("Wake word detected!")
+                    return True
 
-                except sr.UnknownValueError:
-                    self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
-                    if self._ww_fail_count % 5 == 1:
-                        self.log(
-                            f"Wake word not recognized "
-                            f"({self._ww_fail_count} attempts). "
-                            f"Speak clearly after the prompt."
-                        )
-                    continue
-                except Exception as e:
-                    time.sleep(0.5)
-                    continue
+            except sr.UnknownValueError:
+                self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
+                if self._ww_fail_count % 5 == 1:
+                    self.log(
+                        f"Wake word not recognized "
+                        f"({self._ww_fail_count} attempts). "
+                        f"Speak clearly after the prompt."
+                    )
+                continue
+            except Exception as e:
+                time.sleep(0.5)
+                continue
 
         return False

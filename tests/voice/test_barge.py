@@ -120,7 +120,9 @@ class TestBargeInAssistant(unittest.TestCase):
 
         with patch("sopno.core.assistant.BargeInMonitor", return_value=monitor) as mon_cls, patch(
             "sopno.core.assistant.speak"
-        ) as mock_speak, patch("sopno.core.assistant.time.sleep") as mock_sleep:
+        ) as mock_speak, patch("sopno.core.assistant.time.sleep") as mock_sleep, patch(
+            "sopno.core.assistant.settings.barge_in_enabled", True, create=True
+        ):
             asst._deliver_reply("hello there")
 
         mon_cls.assert_called_once()
@@ -139,7 +141,9 @@ class TestBargeInAssistant(unittest.TestCase):
 
         with patch("sopno.core.assistant.BargeInMonitor", return_value=monitor), patch(
             "sopno.core.assistant.speak"
-        ), patch("sopno.core.assistant.time.sleep") as mock_sleep:
+        ), patch("sopno.core.assistant.time.sleep") as mock_sleep, patch(
+            "sopno.core.assistant.settings.barge_in_enabled", True, create=True
+        ):
             asst._deliver_reply("hi")
 
         # Only the post-speech settle (_POST_SPEAK_SETTLE_S) should fire.

@@ -1,14 +1,15 @@
 """
 sopno/voice/mic.py
 ━━━━━━━━━━━━━━━━━━
-Single shared microphone stream for both listener and barge-in.
+Single shared microphone stream with one InputStream callback.
 
-Uses sounddevice (sd.InputStream) — eliminates the PyAudio/sounddevice
-conflict that caused segfaults when both tried to open the same
-PulseAudio device.
+Opens ONE sounddevice InputStream and feeds audio into a single
+thread-safe bytearray buffer. All consumers (wake word, listener,
+barge-in) read sequentially from the same buffer — no fan-out,
+no stale audio, no frame consumption races.
 
-Both the listener (STT capture) and barge-in monitor read from the
-same ring buffer, so there is never a device open/close race.
+Based on the voice-core pattern: single InputStream callback,
+Condition-based read, no ring buffer duplication.
 """
 
 from __future__ import annotations
@@ -17,27 +18,25 @@ import threading
 import time
 from typing import Optional
 
-import numpy as np
-
-from sopno.config.settings import settings
-
 
 class MicStream:
     """
     Thread-safe shared microphone stream.
 
-    Opens one sd.InputStream and stores incoming audio in a ring buffer.
-    Multiple readers (listener, barge-in) can call read() to get frames.
-    The stream runs continuously once started — no open/close races.
+    Opens one sd.InputStream and writes all captured audio into a
+    single bytearray buffer. Consumers call read() to get audio —
+    reading CONSUMES from the buffer (FIFO). This means callers
+    must coordinate access (wake word → listener → barge-in are
+    sequential in the assistant pipeline, so no locking needed).
     """
 
     def __init__(self, log_callback=None):
         self.log = log_callback or (lambda m: print(f"[Mic] {m}"))
         self._sd = None
         self._stream = None
-        self._lock = threading.Lock()
         self._buf = bytearray()
-        self._buf_lock = threading.Lock()
+        self._lock = threading.Lock()
+        self._cond = threading.Condition(self._lock)
         self._rate = 16000
         self._channels = 1
         self._dtype = "int16"
@@ -57,14 +56,13 @@ class MicStream:
         return self._channels
 
     def start(self) -> None:
-        """Open the mic stream and begin capturing into the ring buffer."""
+        """Open the mic stream and begin capturing into the shared buffer."""
         if self._started:
             return
 
         import sounddevice as sd
         self._sd = sd
 
-        # Retry opening — PulseAudio may need a moment after calibration.
         for attempt in range(5):
             try:
                 self._stream = sd.InputStream(
@@ -78,7 +76,7 @@ class MicStream:
                 self._started = True
                 self.log(
                     f"Mic stream opened "
-                    f"(rate={self._rate}, device-native, sounddevice)"
+                    f"(rate={self._rate}, sounddevice, shared buffer)"
                 )
                 return
             except Exception as e:
@@ -101,43 +99,41 @@ class MicStream:
                 pass
             self._stream = None
             self._started = False
+            self._cond.notify_all()
 
-    def _audio_callback(self, indata, frames, time_info, status) -> None:
-        """sounddevice callback — append audio data to the ring buffer."""
-        if status:
-            pass  # overflow/underflow warnings — not critical
-        with self._buf_lock:
-            self._buf.extend(indata.tobytes())
-
-    def read(self, num_frames: int) -> bytes:
+    def read(self, num_frames: int, timeout_s: float = 2.0) -> bytes:
         """
-        Read num_frames worth of audio bytes from the ring buffer.
+        Read exactly num_frames from the shared buffer (blocking).
 
-        Returns raw int16 mono audio bytes. If not enough data is
-        available yet, returns whatever is in the buffer.
+        Returns up to num_frames of audio data. If the buffer has less
+        than requested, waits up to timeout_s for more data to arrive.
+        Returns whatever is available after the timeout (may be empty).
         """
         num_bytes = num_frames * self._channels * self._sample_width
-        with self._buf_lock:
-            if len(self._buf) >= num_bytes:
-                chunk = bytes(self._buf[:num_bytes])
-                self._buf = self._buf[num_bytes:]
-                return chunk
-            # Return whatever we have
-            chunk = bytes(self._buf)
-            self._buf.clear()
+        deadline = time.monotonic() + timeout_s
+
+        with self._cond:
+            while len(self._buf) < num_bytes:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._cond.wait(timeout=min(remaining, 0.05))
+
+            # Take what's available (up to num_bytes)
+            take = min(len(self._buf), num_bytes)
+            if take == 0:
+                return b""
+            chunk = bytes(self._buf[:take])
+            self._buf = self._buf[take:]
             return chunk
 
-    def read_blocking(self, num_frames: int, timeout_s: float = 2.0) -> bytes:
-        """Read exactly num_frames, waiting up to timeout_s if buffer is empty."""
-        deadline = time.monotonic() + timeout_s
-        while time.monotonic() < deadline:
-            chunk = self.read(num_frames)
-            if len(chunk) >= num_frames * self._channels * self._sample_width:
-                return chunk
-            time.sleep(0.005)  # 5ms — small enough for low latency
-        return self.read(num_frames)  # return whatever we got
-
     def flush(self) -> None:
-        """Discard all buffered audio (e.g. after barge-in)."""
-        with self._buf_lock:
+        """Discard all buffered audio (e.g. between conversation turns)."""
+        with self._lock:
             self._buf.clear()
+
+    def _audio_callback(self, indata, frames, time_info, status) -> None:
+        """sounddevice callback — append audio to the shared buffer."""
+        with self._cond:
+            self._buf.extend(indata.tobytes())
+            self._cond.notify_all()

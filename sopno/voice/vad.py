@@ -162,7 +162,7 @@ class TurnTaker:
             read_frames = 1024
 
             while is_running():
-                raw = self._mic_stream.read_blocking(read_frames, timeout_s=0.5)
+                raw = self._mic_stream.read(read_frames, timeout_s=0.5)
                 if not raw:
                     continue
                 chunk_f, resample_state = _to_16k_float(raw, capture_rate, resample_state)
