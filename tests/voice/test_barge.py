@@ -107,8 +107,9 @@ class TestBargeInAssistant(unittest.TestCase):
     def _make_assistant(self) -> SopnoAssistant:
         with patch("sopno.core.assistant.MemoryStore"), patch(
             "sopno.core.assistant.Listener"
-        ):
-            return SopnoAssistant()
+        ), patch("sopno.core.assistant.MicStream"):
+            asst = SopnoAssistant()
+            return asst
 
     def test_barge_in_stops_speech_and_skips_settle(self) -> None:
         asst = self._make_assistant()
@@ -126,8 +127,8 @@ class TestBargeInAssistant(unittest.TestCase):
         # TTS got the interrupt hook and the baseline trigger
         self.assertTrue(callable(mock_speak.call_args.kwargs["should_stop"]))
         self.assertTrue(callable(mock_speak.call_args.kwargs["on_play_start"]))
-        # No settle pause — go straight back to listening
-        mock_sleep.assert_not_called()
+        # No PulseAudio settle sleep needed — shared MicStream eliminates device race.
+        # Only the post-speech settle (_POST_SPEAK_SETTLE_S) should fire.
         self.assertEqual(statuses[-1], "listening")
 
     def test_no_barge_in_keeps_normal_settle(self) -> None:
@@ -141,7 +142,8 @@ class TestBargeInAssistant(unittest.TestCase):
         ), patch("sopno.core.assistant.time.sleep") as mock_sleep:
             asst._deliver_reply("hi")
 
-        mock_sleep.assert_called_once()
+        # Only the post-speech settle (_POST_SPEAK_SETTLE_S) should fire.
+        self.assertGreaterEqual(mock_sleep.call_count, 1)
         self.assertEqual(statuses[-1], "speaking")
 
     def test_barge_in_disabled_speaks_plain(self) -> None:

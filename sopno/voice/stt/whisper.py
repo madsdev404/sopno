@@ -14,7 +14,7 @@ from typing import Optional
 import speech_recognition as sr
 
 from sopno.config.settings import settings
-from sopno.voice.stt.filters import _is_supported_utterance
+from sopno.voice.stt.filters import _is_supported_utterance, correct_transcript
 from sopno.voice.stt.scoring import (
     _audio_is_too_quiet,
     _audio_is_too_short,
@@ -136,9 +136,12 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
         def _run(lang: Optional[str]):
             # initial_prompt biases Whisper towards Bengali script when the
             # language is ambiguous — prevents Hindi/Devanagari hallucinations.
+            # Includes common assistant vocabulary to improve recognition.
             prompt = (
                 "হ্যালো, আমি বাংলায় কথা বলছি। "
-                "তুমি কি করতে পারো? আমাকে সাহায্য করো।"
+                "তুমি কি করতে পারো? আমাকে সাহায্য করো। "
+                "খুঁজে বের করো, সার্চ করো, ইন্টারনেট। "
+                "কবিতা, রোমান্টিক, গান, আবহাওয়া, সময়।"
                 if lang != "en"
                 else None
             )
@@ -230,7 +233,7 @@ def _transcribe_whisper(audio: sr.AudioData, language: Optional[str] = None) -> 
             raise sr.UnknownValueError("Whisper returned an empty or junk transcription.")
 
         print(f"[STT] Final '{detected}' (score={score:.2f}): {text[:80]}")
-        return text
+        return correct_transcript(text)
     finally:
         try:
             os.remove(tmp_path)

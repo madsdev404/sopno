@@ -33,6 +33,7 @@ from sopno.tools.builtins.dev.terminal import _close as close_terminal_shell
 from sopno.tools.builtins.files.files import pending_action, resolve_pending
 from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
+from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
 from sopno.voice.tts import speak
 from sopno.voice.wakeword import WakeWordDetector
@@ -56,29 +57,30 @@ _TOOLISH = re.compile(
     r"|(?:"
     # Single-word / short action tokens
     r"\b(?:"
-    r"open|launch|start|close|search|google|volume|mute|unmute|"
+    r"open|launch|start|close|search|google|source|find|look|"
+    r"volume|mute|unmute|"
     r"play|pause|resume|next|previous|skip|"
     r"time|date|clock|battery|cpu|ram|memory|stats|status|system|"
     r"media|music|song|spotify|browser|chrome|firefox|vscode|terminal|"
-    r"fetch|read|url|web|website|site|page|"
+    r"fetch|read|url|web|website|site|page|internet|online|"
     r"research|find out|look up|tell me about|what is|what are|who is|"
     r"latest|news|update|fact|define|explain|"
     r"terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"
     r"script|compile|build|ping|curl|wget|kill|process|restart|download|"
     r"service|cron|log|journal|systemctl|ps aux|list processes|"
     r"file|folder|directory|create|edit|delete|rename|overwrite|write|notes|note|"
-    r"copy|duplicate|move|find|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
+    r"copy|duplicate|move|grep|search for|read pdf|pdf|docx|xlsx|image|scan|"
     r"remind|reminder|reminders|timer|alert|schedule|remind me|"
-    r"browse|browser|open (?:a )?website|go to website|navigate|website|webpage|"
+    r"browse|navigate|webpage|"
     r"clipboard|copy that|screenshot|screen shot|windows|window|focus|type |typing|"
     r"keyboard|press |keys|key|disk|storage|gpu|graphics|network stats|"
-    r"database|sql|query|install|uninstall|package|apt|pacman|pip|flatpak|"
+    r"database|sql|query|uninstall|package|pacman|flatpak|"
     r"ping|traceroute|wifi|firewall|public ip|my ip|"
     r"email|mail|inbox|calendar|event|meeting|ocr|vision|describe (?:a )?(?:image|picture|screenshot)|"
     r"rule|rules|automation|automate|if .* then |"
     r"subagent|delegate|researcher|coder|reviewer|code review|review this|"
     r"commit|stage|stash|branch|push|pull|merge|diff|"
-    r"code|project|repo|codebase"
+    r"code|project|repo|codebase|poem|song|video|recipe|weather"
     r")\b)"
     r")",
     re.IGNORECASE,
@@ -108,7 +110,11 @@ class SopnoAssistant:
         self.running = True
         self.context = ConversationContext()
         self.dispatcher = CommandDispatcher()
-        self.listener = Listener(log_callback=self.on_log_message)
+
+        # Shared mic stream — one sounddevice InputStream for both listener
+        # and barge-in. Eliminates the PyAudio/sounddevice device race.
+        self.mic_stream = MicStream(log_callback=self.on_log_message)
+        self.listener = Listener(log_callback=self.on_log_message, mic_stream=self.mic_stream)
 
         # Persistent long-term memory — open once, shared with the context
         self.memory_store = MemoryStore()
@@ -157,6 +163,7 @@ class SopnoAssistant:
         """Stop the assistant loop."""
         self.running = False
         close_terminal_shell()
+        self.mic_stream.stop()
         self.reminder_store.close()
         if self._rule_store is not None:
             try:
@@ -215,6 +222,18 @@ class SopnoAssistant:
     def _voice_active(self) -> bool:
         return self.running and self.interaction_mode == "voice"
 
+    def _wake_word_active(self) -> bool:
+        """True while we should keep listening for the wake word.
+
+        Returns False when the user switches to always_on mode mid-wait,
+        so the wake word loop exits immediately and the new mode takes effect.
+        """
+        return (
+            self.running
+            and self.interaction_mode == "voice"
+            and self.listening_mode == "wake_word"
+        )
+
     @property
     def wake_detector(self) -> WakeWordDetector:
         """Lazy-init wake word detector (only created when wake_word mode is active)."""
@@ -233,7 +252,7 @@ class SopnoAssistant:
             speak(text)
             return False
 
-        monitor = BargeInMonitor(log_callback=self.on_log_message, listener=self.listener)
+        monitor = BargeInMonitor(log_callback=self.on_log_message, mic_stream=self.mic_stream)
         monitor.start()
         try:
             speak(
@@ -243,18 +262,24 @@ class SopnoAssistant:
             )
         finally:
             monitor.stop()
+            # Flush stale audio from the ring buffer so the listener
+            # doesn't pick up Sopno's own voice from the speakers.
+            self.mic_stream.flush()
         return monitor.interrupted
 
-    def _deliver_reply(self, text: str, *, status: str = "speaking") -> None:
+    def _deliver_reply(self, text: str, *, status: str = "speaking", barge_in: bool = True) -> None:
         """Show reply in UI; speak aloud only in voice mode."""
         self.on_reply_generated(text)
         with self._speech_lock:
             if self.interaction_mode == "voice":
                 self.on_status_changed(status)
-                if self._speak_with_barge_in(text):
+                if barge_in and self._speak_with_barge_in(text):
                     self.on_log_message("Barge-in detected — stopped speaking.")
                     self.on_status_changed("listening")
                     return
+                if not barge_in:
+                    from sopno.voice.tts import speak
+                    speak(text)
                 time.sleep(_POST_SPEAK_SETTLE_S)
             else:
                 # Text mode: brief "speaking" flash for avatar, no TTS
@@ -326,7 +351,8 @@ class SopnoAssistant:
                 self.on_status_changed("standby")
                 self.on_log_message(f"Waiting for wake word ({', '.join(settings.wake_words)})…")
                 if not self.wake_detector.wait_for_wakeword(
-                    self.listener.recognizer, running_check=self._voice_active
+                    self.listener.recognizer, running_check=self._wake_word_active,
+                    mic_stream=self.mic_stream,
                 ):
                     return None
                 self.on_log_message("Wake word detected — listening for command.")
@@ -342,7 +368,7 @@ class SopnoAssistant:
                 audio = self.listener.listen_for_turn(
                     running_check=self._voice_active,
                     on_speech_start=_on_speech_start,
-                    max_wait_s=0.0,  # wait forever while idle-listening
+                    max_wait_s=0.0,
                     max_utterance_s=12.0,
                 )
             except Exception as e:
@@ -355,13 +381,10 @@ class SopnoAssistant:
             if self.interaction_mode != "voice":
                 continue
             if audio is None:
-                # Aborted (mode switch / stop) or empty — keep listening quietly
                 continue
 
             self.on_log_message("Transcribing speech…")
             try:
-                # Config lock wins; else only force Bangla after an explicit language switch.
-                # Do NOT lock to default context "en" — that breaks Bangla recognition.
                 if settings.stt_language and settings.stt_language != "auto":
                     lang_hint = settings.stt_language
                 elif self.context.current_language == "bn":
@@ -378,14 +401,12 @@ class SopnoAssistant:
                 if not cmd_text:
                     self.on_log_message("Empty transcript — staying quiet.")
                     continue
-                # Match reply language to what was actually spoken
                 if re.search(r"[\u0980-\u09FF]", cmd_text):
                     self.context.current_language = "bn"
                 self.on_log_message(f"User: '{cmd_text}'")
                 self.on_speech_detected(cmd_text)
                 return cmd_text
             except sr.UnknownValueError:
-                # Noise / cough / unclear — do not invent an answer
                 self.on_log_message("Could not understand audio — still listening.")
                 continue
             except Exception as e:
@@ -606,12 +627,15 @@ class SopnoAssistant:
         """Intro → idle listen → answer only when the user speaks."""
         self.on_log_message("Initializing sound system…")
 
+        # Start the shared mic stream first, then calibrate.
+        self.mic_stream.start()
         self.listener.calibrate()
         vad_note = "Silero VAD" if self.listener.turn_taker.available else "classic listen"
         self.on_log_message(f"Sound system ready ({vad_note} turn-taking).")
 
+        # Welcome message — no barge-in needed (nobody is speaking yet).
         welcome_text = "Hello! I'm Sopno. I'm listening whenever you're ready."
-        self._deliver_reply(welcome_text)
+        self._deliver_reply(welcome_text, barge_in=False)
         initial_status = "standby" if self.listening_mode == "wake_word" else "listening"
         self.on_status_changed(initial_status)
 

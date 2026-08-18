@@ -41,8 +41,16 @@ class CommandDispatcher:
             return execute_tool("open_application", {"app_name": app_name})
 
         # ── 3. Search Web ──────────────────────────────────────────────────────
-        if txt.startswith("search ") or txt.startswith("search for ") or txt.startswith("google "):
-            query = re.sub(r'^(search for|search|google)\s+', '', txt)
+        # Only dispatch very simple search commands ("search weather", "google python").
+        # Longer natural-language queries should go to the LLM for proper tool routing.
+        query = None
+        if txt.startswith("search for "):
+            query = txt[len("search for "):]
+        elif txt.startswith("search "):
+            query = txt[len("search "):]
+        elif txt.startswith("google "):
+            query = txt[len("google "):]
+        if query is not None and len(query.split()) <= 4:
             return execute_tool("search_web", {"query": query})
 
         # ── 4. Volume Control ──────────────────────────────────────────────────

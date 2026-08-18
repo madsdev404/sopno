@@ -19,6 +19,33 @@ _HALLUCINATIONS = {
     "",
 }
 
+# Whisper `small` misrecognizes Bengali/Bangla words as similar-sounding English.
+# This map fixes the most common ones so Sopno understands the user.
+_WHISPER_CORRECTIONS: list[tuple[re.Pattern, str]] = [
+    (re.compile(r"\bb[au]ngalow\b", re.I), "Bangla"),
+    (re.compile(r"\bbengalow\b", re.I), "Bangla"),
+    (re.compile(r"\bbangalore\b", re.I), "Bangla"),
+    (re.compile(r"\bbengalor\b", re.I), "Bangla"),
+    (re.compile(r"\bbengal\b", re.I), "Bangla"),
+    (re.compile(r"\bbangle\b", re.I), "Bangla"),
+    (re.compile(r"\bbongla\b", re.I), "Bangla"),
+    (re.compile(r"\bbangley\b", re.I), "Bangla"),
+    (re.compile(r"\bbengaley\b", re.I), "Bangla"),
+    (re.compile(r"\brobust\b", re.I), "romantic"),
+    (re.compile(r"\brobast\b", re.I), "romantic"),
+    (re.compile(r"\bpoam\b", re.I), "poem"),
+    (re.compile(r"\bpome\b", re.I), "poem"),
+]
+
+
+def correct_transcript(text: str) -> str:
+    """Fix common Whisper misrecognitions for Bengali-related words."""
+    if not text:
+        return text
+    for pattern, replacement in _WHISPER_CORRECTIONS:
+        text = pattern.sub(replacement, text)
+    return text
+
 
 def _is_junk(text: str) -> bool:
     cleaned = re.sub(r"[^\w\s\u0980-\u09FF]", "", text or "", flags=re.UNICODE).strip().lower()

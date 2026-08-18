@@ -14,9 +14,11 @@ import sys
 import time
 from typing import Callable, Optional
 
+import audioop
 import speech_recognition as sr
 
 from sopno.config.settings import settings
+from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
 
 
@@ -101,13 +103,15 @@ class WakeWordDetector:
         else:
             self.log("sherpa-onnx model files not found. Using continuous SpeechRecognition for wake words.")
 
-    def wait_for_wakeword(self, recognizer: sr.Recognizer, running_check: Callable[[], bool]) -> bool:
+    def wait_for_wakeword(self, recognizer: sr.Recognizer, running_check: Callable[[], bool],
+                          mic_stream: Optional[MicStream] = None) -> bool:
         """
         Blocks until the wake word is spoken.
 
         Args:
             recognizer: Shared SpeechRecognition Recognizer instance (for fallback)
             running_check: A zero-argument function returning False if the assistant should exit
+            mic_stream: Shared MicStream for audio capture (fallback path)
 
         Returns:
             True if the wake word was successfully detected, False if exiting.
@@ -148,36 +152,77 @@ class WakeWordDetector:
 
         # ── Fallback: Continuous SpeechRecognition check ───────────────────────
         self.log("Listening for wake word (SpeechRecognition fallback)…")
-        while running_check():
-            try:
-                with sr.Microphone() as source:
-                    try:
-                        audio = recognizer.listen(source, timeout=3.0, phrase_time_limit=3.0)
-                    except sr.WaitTimeoutError:
+
+        # If we have a shared MicStream, read audio from it instead of sr.Microphone.
+        if mic_stream is not None:
+            while running_check():
+                try:
+                    # Read ~3 seconds of audio from the shared stream
+                    chunk_size = 1024
+                    frames: list[bytes] = []
+                    total_frames = 0
+                    target_frames = int(mic_stream.rate * 3.0)  # 3 seconds
+
+                    while total_frames < target_frames and running_check():
+                        chunk = mic_stream.read_blocking(chunk_size, timeout_s=0.5)
+                        if not chunk:
+                            continue
+                        frames.append(chunk)
+                        total_frames += len(chunk) // (mic_stream.channels * mic_stream.sample_width)
+
+                    if not frames:
                         continue
 
-                text = transcribe(recognizer, audio)
-                self.log(f"Heard: '{text}'")
-                text_lower = text.lower().strip()
+                    audio = sr.AudioData(b"".join(frames), mic_stream.rate, mic_stream.sample_width)
+                    text = transcribe(recognizer, audio)
+                    self.log(f"Heard: '{text}'")
+                    text_lower = text.lower().strip()
 
-                # Match wake words from config
-                if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
-                    self.log("Wake word detected!")
-                    return True
+                    if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
+                        self.log("Wake word detected!")
+                        return True
 
-            except sr.UnknownValueError:
-                # Whisper couldn't decode — too quiet, too short, or noise.
-                # Only log periodically to avoid log spam.
-                self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
-                if self._ww_fail_count % 5 == 1:
-                    self.log(
-                        f"Wake word not recognized "
-                        f"({self._ww_fail_count} attempts). "
-                        f"Speak clearly after the prompt."
-                    )
-                continue
-            except Exception as e:
-                time.sleep(0.5)
-                continue
+                except sr.UnknownValueError:
+                    self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
+                    if self._ww_fail_count % 5 == 1:
+                        self.log(
+                            f"Wake word not recognized "
+                            f"({self._ww_fail_count} attempts). "
+                            f"Speak clearly after the prompt."
+                        )
+                    continue
+                except Exception as e:
+                    time.sleep(0.5)
+                    continue
+        else:
+            # Legacy fallback with sr.Microphone (PyAudio) — only if no MicStream
+            while running_check():
+                try:
+                    with sr.Microphone() as source:
+                        try:
+                            audio = recognizer.listen(source, timeout=3.0, phrase_time_limit=3.0)
+                        except sr.WaitTimeoutError:
+                            continue
+
+                    text = transcribe(recognizer, audio)
+                    self.log(f"Heard: '{text}'")
+                    text_lower = text.lower().strip()
+
+                    if any(ww.lower().strip() in text_lower for ww in settings.wake_words):
+                        self.log("Wake word detected!")
+                        return True
+
+                except sr.UnknownValueError:
+                    self._ww_fail_count = getattr(self, "_ww_fail_count", 0) + 1
+                    if self._ww_fail_count % 5 == 1:
+                        self.log(
+                            f"Wake word not recognized "
+                            f"({self._ww_fail_count} attempts). "
+                            f"Speak clearly after the prompt."
+                        )
+                    continue
+                except Exception as e:
+                    time.sleep(0.5)
+                    continue
 
         return False

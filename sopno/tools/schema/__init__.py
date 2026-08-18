@@ -38,15 +38,21 @@ _DYNAMIC: list[dict[str, Any]] = []
 # Only matching tools are sent to the LLM, keeping context small.
 
 _ROUTING: list[tuple[re.Pattern, list[str]]] = [
-    # Web / search / research
+    # Web / search / research / poetry / creative content
     (re.compile(
-        r"\b(?:search|google|find|look\s+up|research|fetch|browse|navigate|"
+        r"\b(?:search|google|find|look\s+up|fetch|browse|navigate|"
         r"open\s+(?:a\s+)?website|go\s+to\s+website|webpage|"
         r"latest|news|update|fact|define|explain|who\s+is|what\s+is|what\s+are|"
-        r"tell\s+me\s+about|find\s+out)\b", re.I),
-     ["search_web", "fetch_url", "research",
+        r"tell\s+me\s+about|find\s+out|"
+        r"poem|poetry|kobita|kobita|shairi|ghazal|gazal|"
+        r"romantic|love\s+poem|bangla\s+poem|bengali\s+poem)\b", re.I),
+     ["search_web", "fetch_url",
       "browser_navigate", "browser_click", "browser_type",
       "browser_extract", "browser_screenshot", "browser_back", "browser_close"]),
+    # Heavy research (in-depth, multi-page) — only when explicitly requested
+    (re.compile(
+        r"\b(?:research|in[- ]?depth|deep\s+dive|investigate|analyze)\b", re.I),
+     ["research"]),
     # Terminal / shell / dev / system commands
     (re.compile(
         r"\b(?:terminal|command|shell|run|execute|install|apt|pip|sudo|git|bash|"

@@ -29,6 +29,13 @@ USER_AGENT = (
 _TIMEOUT_S = 15
 _MAX_FETCH_CHARS = 8000
 
+# Detect if a query contains Bengali (Bangla) script or is about Bengali content.
+_BENGALI_RE = re.compile(r"[\u0980-\u09FF]")  # Bengali Unicode block
+_BENGALI_TOPIC_RE = re.compile(
+    r"\b(?:bangla|bengali|বাংলা|রোমান্টিক|কবিতা|poem|poetry|song|"
+    r"gazal|ghazal|shairi|kobita)\b", re.I
+)
+
 
 # ── HTML → text helpers ──────────────────────────────────────────────────────
 
@@ -175,11 +182,18 @@ def _bing_real_url(href: str) -> str:
 
 # ── Engines ──────────────────────────────────────────────────────────────────
 
+def _is_bengali_query(query: str) -> bool:
+    """True if the query contains Bengali script or is about Bengali content."""
+    return bool(_BENGALI_RE.search(query) or _BENGALI_TOPIC_RE.search(query))
+
+
 def _bing_results(query: str, max_results: int) -> list[dict]:
+    is_bn = _is_bengali_query(query)
+    accept_lang = "bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7" if is_bn else "en-US,en;q=0.9"
     resp = requests.get(
         "https://www.bing.com/search",
         params={"q": query},
-        headers={"User-Agent": USER_AGENT, "Accept-Language": "en-US,en;q=0.9"},
+        headers={"User-Agent": USER_AGENT, "Accept-Language": accept_lang},
         timeout=_TIMEOUT_S,
     )
     resp.raise_for_status()
@@ -194,8 +208,11 @@ def _bing_results(query: str, max_results: int) -> list[dict]:
 def _ddg_results(query: str, max_results: int) -> list[dict]:
     from ddgs import DDGS
 
+    kwargs: dict = {"max_results": max_results, "safesearch": "moderate"}
+    if _is_bengali_query(query):
+        kwargs["region"] = "bd-bd"
     with DDGS() as ddgs:
-        results = list(ddgs.text(query, max_results=max_results, safesearch="moderate"))
+        results = list(ddgs.text(query, **kwargs))
     out: list[dict] = []
     for r in results or []:
         title = html.unescape(str(r.get("title") or "")).strip()

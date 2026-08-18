@@ -1,12 +1,11 @@
 """
 sopno/voice/vad.py
-━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━
 Offline Voice Activity Detection (turn-taking) for natural conversation.
 
 Uses Silero VAD via sherpa-onnx to detect when the user starts and finishes
-speaking. Captures at the mic's native sample rate (often 44100), then
-resamples to 16 kHz — opening the mic as 16 kHz on a 44.1 kHz device
-corrupts audio and makes Whisper invent garbage Bangla.
+speaking. Captures from the shared MicStream (sounddevice) — no PyAudio,
+no device races with barge-in.
 """
 
 from __future__ import annotations
@@ -21,6 +20,7 @@ import numpy as np
 import speech_recognition as sr
 
 from sopno.config.settings import settings
+from sopno.voice.mic import MicStream
 
 _SAMPLE_RATE = 16000
 _SILERO_URLS = (
@@ -56,34 +56,6 @@ def _float_to_audio_data(samples: np.ndarray, sample_rate: int = _SAMPLE_RATE) -
     return sr.AudioData(pcm.tobytes(), sample_rate, 2)
 
 
-def _open_mic_stream(pa) -> Tuple[object, int]:
-    """
-    Open the default input at a rate the hardware actually supports.
-    Returns (stream, capture_rate).
-    """
-    import pyaudio
-
-    info = pa.get_default_input_device_info()
-    device_index = int(info["index"])
-    native = int(info.get("defaultSampleRate") or 44100)
-
-    # Prefer native rate — forcing 16000 on a 44100 device garbles speech
-    for rate in (native, 44100, 48000, 16000):
-        try:
-            stream = pa.open(
-                format=pyaudio.paInt16,
-                channels=1,
-                rate=rate,
-                input=True,
-                input_device_index=device_index,
-                frames_per_buffer=1024,
-            )
-            return stream, rate
-        except Exception:
-            continue
-    raise RuntimeError("Could not open microphone input stream.")
-
-
 def _to_16k_float(pcm16: bytes, in_rate: int, resample_state) -> Tuple[np.ndarray, object]:
     """Resample int16 PCM to 16 kHz float32 mono in [-1, 1]."""
     if in_rate != _SAMPLE_RATE:
@@ -98,14 +70,22 @@ class TurnTaker:
 
     Flow:
       idle listen → speech starts → collect → silence after speech → end turn
+
+    Uses the shared MicStream for audio capture — no PyAudio.
     """
 
-    def __init__(self, log_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, log_callback: Optional[Callable[[str], None]] = None,
+                 mic_stream: Optional[MicStream] = None):
         self.log = log_callback or (lambda m: print(f"[VAD] {m}"))
         self._vad = None
         self._window_size = 512
         self._available = False
+        self._mic_stream = mic_stream
         self._init_vad()
+
+    def set_mic_stream(self, stream: MicStream) -> None:
+        """Attach the shared mic stream."""
+        self._mic_stream = stream
 
     @property
     def available(self) -> bool:
@@ -148,19 +128,17 @@ class TurnTaker:
     ) -> Optional[sr.AudioData]:
         """
         Wait for the user to speak, then return one full utterance at 16 kHz.
+
+        Uses the shared MicStream for audio capture.
         """
         if not self._available or self._vad is None:
             return None
 
-        try:
-            import pyaudio
-        except ImportError:
-            self.log("PyAudio missing — cannot run VAD capture.")
+        if self._mic_stream is None:
+            self.log("No MicStream — VAD capture unavailable.")
             return None
 
         is_running = running_check or (lambda: True)
-        pa = pyaudio.PyAudio()
-        stream = None
         speech_started = False
         speech_notified = False
         started_at = time.time()
@@ -177,15 +155,16 @@ class TurnTaker:
             pass
 
         try:
-            stream, capture_rate = _open_mic_stream(pa)
+            capture_rate = self._mic_stream.rate
             self.log(f"Mic capture @ {capture_rate} Hz → resample → {_SAMPLE_RATE} Hz for VAD/STT.")
 
             # Read enough int16 frames so that after resample we keep up with VAD windows
-            # 1024 @ 44100 ≈ 370 samples @ 16k; read multiple chunks as needed
             read_frames = 1024
 
             while is_running():
-                raw = stream.read(read_frames, exception_on_overflow=False)
+                raw = self._mic_stream.read_blocking(read_frames, timeout_s=0.5)
+                if not raw:
+                    continue
                 chunk_f, resample_state = _to_16k_float(raw, capture_rate, resample_state)
                 leftover = np.concatenate([leftover, chunk_f])
 
@@ -218,10 +197,8 @@ class TurnTaker:
                         continue
                     samples = np.asarray(seg, dtype=np.float32)
                     if len(pre_roll):
-                        # Prepend only a short lead-in (VAD segment usually already has onset)
                         lead = pre_roll[-int(0.15 * _SAMPLE_RATE) :]
                         samples = np.concatenate([lead, samples])
-                    # Soft peak normalize — helps Whisper without clipping
                     peak = float(np.max(np.abs(samples))) if len(samples) else 0.0
                     if peak > 1e-3:
                         samples = samples * min(0.95 / peak, 3.0)
@@ -251,14 +228,3 @@ class TurnTaker:
         except Exception as e:
             self.log(f"VAD capture error: {e}")
             return None
-        finally:
-            if stream is not None:
-                try:
-                    stream.stop_stream()
-                    stream.close()
-                except Exception:
-                    pass
-            try:
-                pa.terminate()
-            except Exception:
-                pass

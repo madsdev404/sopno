@@ -1,25 +1,25 @@
 """
 sopno/voice/listener.py
-━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 Microphone capture and ambient-noise calibration.
 
-Default capture path uses SpeechRecognition's Microphone (device-native
-sample rate). The custom Silero/PyAudio VAD path is optional because
-forcing 16 kHz on a 44.1 kHz Linux mic was corrupting audio and making
-Whisper invent garbage for both Bangla and English.
+Uses the shared MicStream (sounddevice) for audio capture — no PyAudio.
+This eliminates the device open/close race that caused segfaults when
+PyAudio (listener) and sounddevice (barge-in) competed for the mic.
 """
 
 from __future__ import annotations
 
 import audioop
+import struct
 import sys
-import threading
 import time
 from typing import Callable, Optional
 
 import speech_recognition as sr
 
 from sopno.config.settings import settings
+from sopno.voice.mic import MicStream
 from sopno.voice.vad import TurnTaker
 
 
@@ -49,7 +49,8 @@ _install_alsa_error_handler()
 class Listener:
     """Calibration + one-turn microphone capture for STT."""
 
-    def __init__(self, log_callback: Optional[Callable[[str], None]] = None):
+    def __init__(self, log_callback: Optional[Callable[[str], None]] = None,
+                 mic_stream: Optional[MicStream] = None):
         self.log = log_callback or (lambda m: print(f"[Listener] {m}"))
         self.recognizer = sr.Recognizer()
         self.recognizer.dynamic_energy_threshold = settings.dynamic_energy_threshold
@@ -57,14 +58,14 @@ class Listener:
         self.recognizer.phrase_threshold = settings.phrase_threshold
         self.recognizer.energy_threshold = float(settings.energy_threshold_floor)
         self.recognizer.non_speaking_duration = min(0.5, settings.pause_threshold * 0.4)
-        self.turn_taker = TurnTaker(log_callback=self.log)
-        self._mic: Optional[sr.Microphone] = None
-        # Shared PyAudio for barge-in — avoids opening a second mic stream
-        # which fails on PulseAudio (only one client per device allowed).
-        self._shared_pa = None
-        self._shared_stream = None
-        self._shared_rate: int = 0
-        self._shared_lock = threading.Lock()
+        self.turn_taker = TurnTaker(log_callback=self.log, mic_stream=mic_stream)
+        self._mic_stream: Optional[MicStream] = mic_stream
+        self._last_barge_close: float = 0.0  # set by assistant after barge-in
+
+    def set_mic_stream(self, stream: MicStream) -> None:
+        """Attach the shared mic stream (called by assistant before calibrate)."""
+        self._mic_stream = stream
+        self.turn_taker.set_mic_stream(stream)
 
     def _clamp_energy(self) -> None:
         """Keep threshold low enough that normal speech always starts a phrase."""
@@ -81,100 +82,88 @@ class Listener:
             )
         self.recognizer.energy_threshold = clamped
 
-    def _get_mic(self) -> sr.Microphone:
-        """Reuse one Microphone so sample rate stays consistent."""
-        if self._mic is None:
-            # sample_rate=None → hardware default (usually 44100). Never force 16000 here.
-            self._mic = sr.Microphone()
-            self.log(
-                f"Mic device ready "
-                f"(sample_rate={self._mic.SAMPLE_RATE} Hz, width={self._mic.SAMPLE_WIDTH})."
-            )
-        return self._mic
-
-    def open_shared_mic(self):
-        """Open a PyAudio mic stream for barge-in to share.
-
-        Returns (pyaudio_stream, sample_rate) or (None, 0) on failure.
-        The caller must call close_shared_mic() when done.
-        """
-        import pyaudio
-
-        with self._shared_lock:
-            if self._shared_stream is not None:
-                return self._shared_stream, self._shared_rate
-            try:
-                pa = pyaudio.PyAudio()
-                info = pa.get_default_input_device_info()
-                device_index = int(info["index"])
-                native = int(info.get("defaultSampleRate") or 44100)
-                for rate in (native, 44100, 48000, 16000):
-                    try:
-                        stream = pa.open(
-                            format=pa.paInt16,
-                            channels=1,
-                            rate=rate,
-                            input=True,
-                            input_device_index=device_index,
-                            frames_per_buffer=1024,
-                        )
-                        self._shared_pa = pa
-                        self._shared_stream = stream
-                        self._shared_rate = rate
-                        self.log(f"Shared mic opened for barge-in ({rate} Hz).")
-                        return stream, rate
-                    except Exception:
-                        continue
-                pa.terminate()
-            except Exception as e:
-                self.log(f"Shared mic open failed: {e}")
-            return None, 0
-
-    def close_shared_mic(self) -> None:
-        """Close the shared PyAudio mic stream."""
-        with self._shared_lock:
-            try:
-                if self._shared_stream is not None:
-                    self._shared_stream.stop_stream()
-                    self._shared_stream.close()
-            except Exception:
-                pass
-            try:
-                if self._shared_pa is not None:
-                    self._shared_pa.terminate()
-            except Exception:
-                pass
-            self._shared_stream = None
-            self._shared_pa = None
-            self._shared_rate = 0
-
     def calibrate(self, duration: float = 0.8) -> None:
-        """Light ambient calibration, then clamp — heavy cal made the mic deaf."""
+        """Light ambient calibration using the shared MicStream."""
+        if self._mic_stream is None:
+            print("[Listener] ERROR: No MicStream attached. Call set_mic_stream() first.")
+            sys.exit(1)
+
         try:
-            mic = self._get_mic()
-            with mic as source:
-                self.log("Calibrating microphone for background noise…")
-                self.recognizer.adjust_for_ambient_noise(source, duration=duration)
-                self._clamp_energy()
-                self.log(
-                    f"Microphone ready "
-                    f"(energy_threshold={self.recognizer.energy_threshold:.0f}, "
-                    f"pause={self.recognizer.pause_threshold:.1f}s)."
+            self.log("Calibrating microphone for background noise…")
+            self._mic_stream.start()
+
+            # Read ambient noise for `duration` seconds
+            total_frames = int(self._mic_stream.rate * duration)
+            chunk_size = 1024
+            energies = []
+
+            frames_read = 0
+            while frames_read < total_frames:
+                chunk = self._mic_stream.read_blocking(chunk_size)
+                if not chunk:
+                    time.sleep(0.01)
+                    continue
+                # chunk is int16 mono bytes — compute RMS energy
+                energy = audioop.rms(chunk, 2)
+                energies.append(energy)
+                frames_read += len(chunk) // (self._mic_stream.channels * self._mic_stream.sample_width)
+
+            if energies:
+                avg_energy = sum(energies) / len(energies)
+                # Set threshold to ~2x ambient noise (standard SR calibration)
+                self.recognizer.energy_threshold = max(
+                    float(settings.energy_threshold_floor),
+                    avg_energy * 2.0,
                 )
+
+            self._clamp_energy()
+            self.log(
+                f"Microphone ready "
+                f"(energy_threshold={self.recognizer.energy_threshold:.0f}, "
+                f"pause={self.recognizer.pause_threshold:.1f}s, "
+                f"sample_rate={self._mic_stream.rate} Hz)."
+            )
         except Exception as e:
             print(f"[Listener] ERROR: Could not access microphone — {e}")
-            print("  Check your microphone connection and PyAudio installation.")
+            print("  Check your microphone connection and sounddevice installation.")
             sys.exit(1)
 
     def listen(self, phrase_time_limit: int = 10) -> sr.AudioData:
-        """Record until a pause (SpeechRecognition)."""
-        mic = self._get_mic()
-        with mic as source:
-            return self.recognizer.listen(
-                source,
-                timeout=None,
-                phrase_time_limit=phrase_time_limit,
-            )
+        """Record until a pause — reads from the shared MicStream."""
+        if self._mic_stream is None:
+            raise RuntimeError("No MicStream attached")
+
+        frames: list[bytes] = []
+        chunk_size = 1024
+        seconds_per_buffer = chunk_size / float(self._mic_stream.rate)
+        pause_limit = int(self.recognizer.pause_threshold / seconds_per_buffer)
+        phrase_limit = int(phrase_time_limit / seconds_per_buffer)
+        pause_count = 0
+        phrase_count = 0
+
+        while phrase_count < phrase_limit:
+            chunk = self._mic_stream.read_blocking(chunk_size)
+            if not chunk:
+                break
+            frames.append(chunk)
+            phrase_count += 1
+
+            energy = audioop.rms(chunk, 2)
+            if energy > self.recognizer.energy_threshold:
+                pause_count = 0
+            else:
+                pause_count += 1
+            if pause_count > pause_limit:
+                break
+
+        if not frames:
+            raise sr.UnknownValueError("no audio captured")
+
+        return sr.AudioData(
+            b"".join(frames),
+            self._mic_stream.rate,
+            self._mic_stream.sample_width,
+        )
 
     def listen_for_turn(
         self,
@@ -188,8 +177,7 @@ class Listener:
         """
         Wait for the user to speak, then return one full utterance.
 
-        Default: classic SpeechRecognition (reliable audio).
-        Optional: Silero VAD if settings.stt_capture == \"vad\".
+        Reads from the shared MicStream — no PyAudio, no device races.
         """
         use_vad = (
             getattr(settings, "stt_capture", "classic") == "vad"
@@ -208,64 +196,38 @@ class Listener:
         if running_check is not None and not running_check():
             return None
 
+        if self._mic_stream is None:
+            self.log("No MicStream attached — cannot listen.")
+            return None
+
         need = float(self.recognizer.energy_threshold)
         self.log(
-            "Capture mode: classic mic (device-native rate) "
+            "Capture mode: shared MicStream (sounddevice, no PyAudio) "
             f"[need energy > {need:.0f}]"
         )
 
-        # Always enforce a max wait — prevents the loop from hanging forever
-        # when the energy threshold is miscalibrated.  User-provided 0 means
-        # "no limit" but we cap at 30 s to keep the assistant responsive.
-        effective_timeout = (
-            None
-            if max_wait_s <= 0
-            else float(max_wait_s)
-        )
-        _HARD_WAIT_LIMIT = 30.0  # seconds — re-clamp threshold after this
+        effective_timeout = None if max_wait_s <= 0 else float(max_wait_s)
+        _HARD_WAIT_LIMIT = 30.0
 
         limit = int(max_utterance_s) if max_utterance_s else phrase_time_limit
 
-        try:
-            mic = self._get_mic()
-            with mic as source:
-                if getattr(source, "stream", None) is None:
-                    raise RuntimeError(
-                        "Microphone stream failed to open "
-                        "(check mic permissions / device)."
-                    )
-                audio = self._listen_with_level_logs(
-                    source,
-                    running_check=running_check,
-                    timeout=effective_timeout,
-                    phrase_time_limit=limit,
-                    on_speech_start=on_speech_start,
-                    hard_wait_limit=_HARD_WAIT_LIMIT,
-                )
-            if audio is None:
-                return None
-            duration = len(audio.frame_data) / float(
-                audio.sample_rate * audio.sample_width or 1
-            )
-            self.log(f"Turn captured (~{duration:.1f}s @ {audio.sample_rate} Hz).")
-            return audio
-        except sr.WaitTimeoutError:
-            # No speech detected — threshold is probably too high.
-            # Halve it (ignoring the floor) so the next attempt is more sensitive.
-            old = float(self.recognizer.energy_threshold)
-            new = old * 0.5
-            self.recognizer.energy_threshold = new
-            self.log(
-                f"No speech detected — lowering threshold: {old:.0f} → {new:.0f}"
-            )
+        audio = self._listen_with_level_logs(
+            running_check=running_check,
+            timeout=effective_timeout,
+            phrase_time_limit=limit,
+            on_speech_start=on_speech_start,
+            hard_wait_limit=_HARD_WAIT_LIMIT,
+        )
+
+        if audio is None:
             return None
-        except Exception as e:
-            self.log(f"Classic listen failed: {e}")
-            return None
+
+        duration = len(audio.frame_data) / float(audio.sample_rate * audio.sample_width or 1)
+        self.log(f"Turn captured (~{duration:.1f}s @ {audio.sample_rate} Hz).")
+        return audio
 
     def _listen_with_level_logs(
         self,
-        source: sr.AudioSource,
         *,
         running_check: Optional[Callable[[], bool]],
         timeout: Optional[float],
@@ -274,12 +236,15 @@ class Listener:
         hard_wait_limit: float = 30.0,
     ) -> Optional[sr.AudioData]:
         """
-        Like Recognizer.listen, but periodically logs mic RMS so a deaf
-        threshold / silent device is obvious in the HUD.
+        Like Recognizer.listen, but reads from the shared MicStream
+        and periodically logs mic RMS.
         """
-        assert source.stream is not None, "Microphone stream failed to open"
+        if self._mic_stream is None:
+            return None
 
-        seconds_per_buffer = float(source.CHUNK) / float(source.SAMPLE_RATE)
+        rate = self._mic_stream.rate
+        chunk_size = 1024
+        seconds_per_buffer = chunk_size / float(rate)
         elapsed = 0.0
         last_log = 0.0
         peak = 0
@@ -290,8 +255,6 @@ class Listener:
         while True:
             if running_check is not None and not running_check():
                 return None
-            # Hard limit: even with max_wait_s=0, bail after 30s to avoid
-            # an infinite hang when the energy threshold is miscalibrated.
             if elapsed > hard_wait_limit:
                 self.log(
                     f"No speech detected after {hard_wait_limit:.0f}s — "
@@ -303,11 +266,11 @@ class Listener:
             if timeout is not None and elapsed > timeout:
                 raise sr.WaitTimeoutError("listening timed out while waiting for phrase to start")
 
-            buffer = source.stream.read(source.CHUNK)
-            if len(buffer) == 0:
+            chunk = self._mic_stream.read_blocking(chunk_size)
+            if not chunk:
                 break
             elapsed += seconds_per_buffer
-            energy = audioop.rms(buffer, source.SAMPLE_WIDTH)
+            energy = audioop.rms(chunk, 2)
             if energy > peak:
                 peak = energy
 
@@ -319,9 +282,7 @@ class Listener:
                 last_log = elapsed
 
             if energy > self.recognizer.energy_threshold:
-                frames.append(buffer)
-                # Fire speech-start callback immediately so the UI can
-                # show "processing" instead of stuck on "listening".
+                frames.append(chunk)
                 if on_speech_start is not None and not _speech_fired:
                     _speech_fired = True
                     on_speech_start()
@@ -344,14 +305,14 @@ class Listener:
             if phrase_time_limit and phrase_elapsed > phrase_time_limit:
                 break
 
-            buffer = source.stream.read(source.CHUNK)
-            if len(buffer) == 0:
+            chunk = self._mic_stream.read_blocking(chunk_size)
+            if not chunk:
                 break
-            frames.append(buffer)
+            frames.append(chunk)
             phrase_elapsed += seconds_per_buffer
             phrase_count += 1
 
-            energy = audioop.rms(buffer, source.SAMPLE_WIDTH)
+            energy = audioop.rms(chunk, 2)
             if energy > self.recognizer.energy_threshold:
                 pause_count = 0
             else:
@@ -364,9 +325,8 @@ class Listener:
         if drop:
             frames = frames[: len(frames) - drop]
         spoken = phrase_count - pause_count
-        if spoken < phrase_limit and len(buffer) != 0:
-            # Too short — treat as no speech (caller keeps listening)
+        if spoken < phrase_limit and len(frames) > 0:
             self.log(f"Ignored short blip ({spoken} buffers, need ≥ {phrase_limit}).")
             return None
 
-        return sr.AudioData(b"".join(frames), source.SAMPLE_RATE, source.SAMPLE_WIDTH)
+        return sr.AudioData(b"".join(frames), rate, self._mic_stream.sample_width)
