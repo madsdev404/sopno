@@ -6,7 +6,7 @@ Edge-drag resizing and window dragging mixin.
 
 from PyQt5.QtCore import QPoint, QRect, Qt
 
-from sopno.ui.hud.visuals.theme import EDGE, MAX_SIZE, MIN_SIZE
+from sopno.ui.hud.visuals.theme import EDGE, MIN_SIZE
 
 
 class ResizeMixin:

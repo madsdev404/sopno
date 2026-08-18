@@ -140,7 +140,7 @@ class ChatThread(QScrollArea):
                 w.deleteLater()
                 self._count -= 1
 
-        QTimer.singleShot(30, self._scroll_bottom)
+        QTimer.singleShot(50, self._scroll_bottom)
 
     def _scroll_bottom(self) -> None:
         bar = self.verticalScrollBar()

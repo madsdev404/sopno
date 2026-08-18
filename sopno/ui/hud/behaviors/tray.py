@@ -49,6 +49,10 @@ class TrayMixin:
         hide_a.triggered.connect(self.hide_hud)
         menu.addAction(hide_a)
         menu.addSeparator()
+        dash_a = QAction("Toggle Dashboard", self)
+        dash_a.triggered.connect(self._toggle_dashboard)
+        menu.addAction(dash_a)
+        menu.addSeparator()
         for key, label in (("small", "Size: Small"), ("medium", "Size: Medium"), ("full", "Size: Full")):
             act = QAction(label, self)
             act.triggered.connect(lambda _=False, k=key: self.apply_size_preset(k))

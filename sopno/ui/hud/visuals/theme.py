@@ -1,20 +1,18 @@
 """
 sopno/ui/hud/visuals/theme.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Shared constants and QSS templates for the HUD package.
 """
 
 from PyQt5.QtGui import QColor
 
-# Preset panel sizes (width × height). User can also free-drag edges.
 SIZE_PRESETS = {
     "small":  (280, 360),
     "medium": (380, 560),
     "full":   (520, 740),
 }
 MIN_SIZE = (260, 320)
-MAX_SIZE = (720, 960)
-EDGE = 8  # px hit-zone for drag-resize
+EDGE = 8
 
 STATUS_COPY = {
     "standby":   ("Idle", "#8B9BB4"),
@@ -42,22 +40,6 @@ _CHROME = """
         padding: 0px;
     }}
     QPushButton:hover {{ color: {hover}; }}
-"""
-
-# VS Code–style toolbar icon button (codicon density: 22px hit, quiet hover)
-_TOOL_ICON = """
-    QPushButton {{
-        background: {bg};
-        border: none;
-        border-radius: 5px;
-        padding: 0px;
-    }}
-    QPushButton:hover {{
-        background: rgba(255, 255, 255, 0.08);
-    }}
-    QPushButton:pressed {{
-        background: rgba(255, 255, 255, 0.12);
-    }}
 """
 
 _SEGMENT = """

@@ -80,9 +80,11 @@ def _paint_icon(kind: str, size: int = 36, color: QColor | None = None, active: 
         p.drawLine(QPointF(cx - 3.5, cy - 3.5), QPointF(cx + 3.5, cy + 3.5))
         p.drawLine(QPointF(cx + 3.5, cy - 3.5), QPointF(cx - 3.5, cy + 3.5))
     elif kind == "hide":
-        # Horizontal line with up arrow (hide to tray)
-        y = cy + 2
+        # Up arrow + horizontal line (hide to tray)
+        y = cy + 3
         p.drawLine(QPointF(cx - 3, y), QPointF(cx + 3, y))
+        p.drawLine(QPointF(cx - 3, y), QPointF(cx, cy - 1))
+        p.drawLine(QPointF(cx + 3, y), QPointF(cx, cy - 1))
 
     p.end()
     return QIcon(pm)

@@ -26,16 +26,23 @@ class StatusMixin:
             f"color: {color}; background: transparent; letter-spacing: 0.4px;"
         )
 
-        if self.interaction_mode == "text":
-            return
         wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
-        hints = {
-            "standby":   f"Say '{wake_words_str}'…" if getattr(settings, "listening_mode", "wake_word") == "wake_word" else self._listen_hint,
-            "listening": self._listen_hint,
-            "thinking":  "Thinking…",
-            "speaking":  "Speaking…",
-            "error":     "Something went wrong",
-        }
+        if self.interaction_mode == "text":
+            hints = {
+                "standby":   "Type a message",
+                "listening": "Listening…",
+                "thinking":  "Thinking…",
+                "speaking":  "Speaking…",
+                "error":     "Something went wrong",
+            }
+        else:
+            hints = {
+                "standby":   f"Say '{wake_words_str}'…" if getattr(settings, "listening_mode", "wake_word") == "wake_word" else self._listen_hint,
+                "listening": self._listen_hint,
+                "thinking":  "Thinking…",
+                "speaking":  "Speaking…",
+                "error":     "Something went wrong",
+            }
         self.context_label.setText(hints.get(self.current_status, self._listen_hint))
 
     def update_user_speech(self, text: str) -> None:

@@ -1,6 +1,6 @@
 """
 sopno/ui/hud/behaviors/responsive.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Responsive sizing mixin: preset sizes, drag-resize scaling, density tokens.
 """
 
@@ -17,9 +17,11 @@ class ResponsiveMixin:
     """Sizes, scales, and re-styles the HUD from the current window width."""
 
     def _metrics_for_width(self, w: int) -> dict:
-        """Responsive tokens from panel width (works for presets + drag-resize)."""
+        """Responsive tokens from panel width — voice mode has larger orb."""
+        is_voice = getattr(self, "interaction_mode", "voice") == "voice"
+
         if w < 320:
-            return dict(
+            base = dict(
                 margin=8, gap=4, chrome=20, icon=12, chrome_font=12,
                 context_pt=8, face=56, status_pt=7, tag_pt=7, body_pt=8,
                 bubble_pad=7, bubble_r=10, bubble_gap=6, log_pt=6,
@@ -27,8 +29,8 @@ class ResponsiveMixin:
                 mode_font=9, mode_icon=11, mode_r=12, show_status=False, show_log=False,
                 hint="Listening…",
             )
-        if w < 440:
-            return dict(
+        elif w < 440:
+            base = dict(
                 margin=10, gap=6, chrome=22, icon=14, chrome_font=13,
                 context_pt=8, face=78, status_pt=8, tag_pt=7, body_pt=9,
                 bubble_pad=8, bubble_r=12, bubble_gap=7, log_pt=6,
@@ -36,14 +38,22 @@ class ResponsiveMixin:
                 mode_font=10, mode_icon=12, mode_r=14, show_status=True, show_log=True,
                 hint="Listening… say something",
             )
-        return dict(
-            margin=14, gap=8, chrome=24, icon=15, chrome_font=14,
-            context_pt=9, face=110, status_pt=9, tag_pt=8, body_pt=10,
-            bubble_pad=10, bubble_r=14, bubble_gap=8, log_pt=7,
-            send=34, send_icon=17, mode_pad_v=5, mode_pad_h=12,
-            mode_font=11, mode_icon=13, mode_r=16, show_status=True, show_log=True,
-            hint="Listening… say something",
-        )
+        else:
+            base = dict(
+                margin=14, gap=8, chrome=24, icon=15, chrome_font=14,
+                context_pt=9, face=110, status_pt=9, tag_pt=8, body_pt=10,
+                bubble_pad=10, bubble_r=14, bubble_gap=8, log_pt=7,
+                send=34, send_icon=17, mode_pad_v=5, mode_pad_h=12,
+                mode_font=11, mode_icon=13, mode_r=16, show_status=True, show_log=True,
+                hint="Listening… say something",
+            )
+
+        if is_voice:
+            base["face"] = min(base["face"] + 30, 150)
+        else:
+            base["face"] = 56
+
+        return base
 
     def _apply_responsive(self) -> None:
         """Scale header, type, icons, robot, chat to current window size."""
@@ -53,10 +63,9 @@ class ResponsiveMixin:
         self._metrics = m
         self._listen_hint = m["hint"]
 
-        # Shell margins + softer radius on small panels
         pad = m["margin"]
         self._root.setContentsMargins(pad, pad - 2, pad - 2, pad - 2)
-        radius = 16 if self.width() < 320 else (20 if self.width() < 440 else 24)
+        radius = 8 if self.width() < 320 else (10 if self.width() < 440 else 10)
         self.central_widget.setStyleSheet(f"""
             QWidget#CentralWidget {{
                 background-color: rgba(12, 16, 24, {settings.hud_opacity});
@@ -65,7 +74,6 @@ class ResponsiveMixin:
             }}
         """)
 
-        # Compact header text + chrome
         self.context_label.setFont(QFont("IBM Plex Sans", m["context_pt"]))
         self.context_label.setMaximumHeight(m["chrome"] + 2)
         if self.interaction_mode == "voice" and self.current_status in ("standby", "listening"):
@@ -87,14 +95,12 @@ class ResponsiveMixin:
 
         self._refresh_win_btns()
 
-        # Robot + status
         self.robot.set_face_size(m["face"])
         self.status_label.setVisible(m["show_status"])
         self.status_label.setFont(QFont("IBM Plex Sans", m["status_pt"], QFont.Medium))
         self.log_display.setVisible(m["show_log"])
         self.log_display.setFont(QFont("IBM Plex Mono", m["log_pt"]))
 
-        # Mode toggle + composer
         self.mode_toggle.apply_scale(
             pad_v=m["mode_pad_v"],
             pad_h=m["mode_pad_h"],
@@ -116,7 +122,6 @@ class ResponsiveMixin:
         self.send_btn.setIcon(_paint_icon(kind, m["send"], active=False))
         self.text_input.setFont(QFont("IBM Plex Sans", m["body_pt"]))
 
-        # Stage / dock spacing via root inserts — keep modest
         self.dock.setStyleSheet(f"""
             QFrame#Dock {{
                 background: rgba(255, 255, 255, 0.04);
@@ -124,6 +129,8 @@ class ResponsiveMixin:
                 border-radius: {max(12, m['mode_r'])}px;
             }}
         """)
+
+        self._apply_mode_layout()
 
     def apply_size_preset(self, mode: str, *, anchor_top_right: bool = False) -> None:
         mode = mode if mode in SIZE_PRESETS else "medium"
@@ -142,4 +149,3 @@ class ResponsiveMixin:
             self.move(x, y)
 
         self._apply_responsive()
-        self._apply_mode_layout()

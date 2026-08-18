@@ -95,7 +95,7 @@ class ChromeMixin:
         if not text:
             return
         self.text_input.clear()
-        # Don't add_message here — assistant emits speech_detected once (same as voice)
+        self.chat.add_message("user", text)
         if hasattr(self, "worker") and self.worker:
             self.worker.submit_text(text)
 

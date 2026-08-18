@@ -1,6 +1,6 @@
 """
 sopno/ui/hud/window.py
-━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━
 The floating HUD main window — builds the layout and wires it to the assistant.
 """
 
@@ -9,7 +9,7 @@ from __future__ import annotations
 import threading
 
 from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtGui import QColor, QFont
+from PyQt5.QtGui import QColor, QFont, QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -28,7 +28,7 @@ from sopno.config.settings import settings
 from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, StatusMixin, TrayMixin
 from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
-from sopno.ui.hud.visuals.theme import MAX_SIZE, MIN_SIZE
+from sopno.ui.hud.visuals.theme import MIN_SIZE
 from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle
 from sopno.ui.hud.worker import AssistantWorker
 
@@ -54,10 +54,11 @@ class SopnoHUDWindow(
         self.current_status = "listening"
         self._listen_hint = "Listening… say something"
         self._is_maximized = False
-        self._prev_geo = None  # restore geometry after maximize
+        self._prev_geo = None
 
         self.init_ui()
         self.init_tray()
+        self._init_shortcuts()
 
         self.worker = AssistantWorker()
         self.thread = threading.Thread(target=self.worker.start_loop, daemon=True)
@@ -69,6 +70,16 @@ class SopnoHUDWindow(
             lambda msg: self.dashboard.append_log(msg) if self.dashboard else None
         )
         self.thread.start()
+
+    def _init_shortcuts(self) -> None:
+        """Keyboard shortcuts for common actions."""
+        from PyQt5.QtWidgets import QShortcut
+        QShortcut(QKeySequence("Ctrl+Q"), self, self.close_app)
+        QShortcut(QKeySequence("Escape"), self, self.hide_hud)
+        QShortcut(QKeySequence("Ctrl+M"), self, self._toggle_maximize)
+        QShortcut(QKeySequence("Ctrl+D"), self, self._toggle_dashboard)
+        QShortcut(QKeySequence("Ctrl+T"), self, lambda: self.set_interaction_mode("text"))
+        QShortcut(QKeySequence("Ctrl+R"), self, lambda: self.set_interaction_mode("voice"))
 
     def init_ui(self) -> None:
         self.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint | Qt.Tool)
@@ -84,7 +95,7 @@ class SopnoHUDWindow(
             QWidget#CentralWidget {{
                 background-color: rgba(12, 16, 24, {settings.hud_opacity});
                 border: 1px solid rgba(255, 255, 255, 0.08);
-                border-radius: 24px;
+                border-radius: 10px;
             }}
         """)
 
@@ -120,7 +131,6 @@ class SopnoHUDWindow(
         chrome.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
         self._chrome = chrome
 
-        # Hide to tray
         self.hide_btn = self._chrome_btn(
             "", "#E8A0BF", "Hide to system tray", size=22, font_size=14,
         )
@@ -129,7 +139,6 @@ class SopnoHUDWindow(
         self.hide_btn.clicked.connect(self.hide_hud)
         chrome.addWidget(self.hide_btn, 0, Qt.AlignVCenter)
 
-        # Maximize / restore
         self.maximize_btn = self._chrome_btn(
             "", "#E8EEF7", "Maximize", size=22, font_size=14,
         )
@@ -139,7 +148,6 @@ class SopnoHUDWindow(
         self._win_btns["maximize"] = self.maximize_btn
         chrome.addWidget(self.maximize_btn, 0, Qt.AlignVCenter)
 
-        # Close
         self.close_btn = self._chrome_btn(
             "", "#F07178", "Close", size=22, font_size=14,
         )
@@ -157,6 +165,7 @@ class SopnoHUDWindow(
         stage = QVBoxLayout()
         stage.setSpacing(2)
         stage.setAlignment(Qt.AlignCenter)
+        self._stage = stage
 
         self.robot = AliveRobotFace(size=100)
 
@@ -164,6 +173,7 @@ class SopnoHUDWindow(
         status_row = QHBoxLayout()
         status_row.setAlignment(Qt.AlignCenter)
         status_row.setSpacing(6)
+        self._status_row = status_row
 
         self.status_label = QLabel("Idle")
         self.status_label.setAlignment(Qt.AlignCenter)
@@ -173,7 +183,6 @@ class SopnoHUDWindow(
         )
 
         self.listening_chip = QPushButton()
-        self.listening_chip.setCheckable(True)
         self.listening_chip.setCursor(Qt.PointingHandCursor)
         self.listening_chip.setFocusPolicy(Qt.NoFocus)
         self.listening_chip.setFixedHeight(18)
@@ -195,7 +204,7 @@ class SopnoHUDWindow(
         root.addWidget(self.chat, 1)
         root.addSpacing(10)
 
-        # ── Read-only dashboard (settings / memory / tools / logs / models) ──
+        # ── Dashboard (toggled via Ctrl+D or tray) ───────────────────────────
         self.dashboard = None
         try:
             self.dashboard = DashboardPanel()
@@ -274,16 +283,25 @@ class SopnoHUDWindow(
         super().resizeEvent(event)
         self._apply_responsive()
 
+    def keyPressEvent(self, event) -> None:
+        """Route Enter/Return from text_input (already handled by returnPressed)."""
+        super().keyPressEvent(event)
+
     def _apply_mode_layout(self) -> None:
+        """Show/hide elements based on voice vs text mode."""
         is_text = self.interaction_mode == "text"
         self.dock.setVisible(is_text)
         self.listening_chip.setVisible(not is_text)
         self.mode_toggle.set_mode(self.interaction_mode, emit=False)
 
         if is_text:
+            self.robot.set_face_size(56)
             self.context_label.setText("Type a message")
             self.text_input.setFocus()
         else:
+            m = getattr(self, "_metrics", None)
+            face_size = m["face"] if m else 100
+            self.robot.set_face_size(face_size)
             if self.current_status in ("standby", "listening"):
                 if self.current_status == "standby" and getattr(settings, "listening_mode", "wake_word") == "wake_word":
                     wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
@@ -316,6 +334,15 @@ class SopnoHUDWindow(
             else:
                 self.context_label.setText(self._listen_hint)
 
+    def _toggle_dashboard(self) -> None:
+        """Toggle dashboard panel visibility."""
+        if self.dashboard is None:
+            return
+        visible = not self.dashboard.isVisible()
+        self.dashboard.setVisible(visible)
+        if visible and hasattr(self.dashboard, "refresh"):
+            self.dashboard.refresh()
+
     def position_hud(self) -> None:
         screen = QApplication.primaryScreen().availableGeometry()
         self.move(screen.x() + screen.width() - self.width() - 36, screen.y() + 56)
@@ -334,7 +361,6 @@ class SopnoHUDWindow(
         self._refresh_win_btns()
 
     def _refresh_win_btns(self) -> None:
-        """Update maximize button icon to reflect current state."""
         btn = self._win_btns.get("maximize")
         if btn:
             kind = "restore" if self._is_maximized else "maximize"
