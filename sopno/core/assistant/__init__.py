@@ -31,7 +31,6 @@ from sopno.tools.schema import get_schema, get_schema_for
 from sopno.tools.registry import execute_tool
 from sopno.tools.builtins.dev.terminal import _close as close_terminal_shell
 from sopno.tools.builtins.files.files import pending_action, resolve_pending
-from sopno.voice.barge import BargeInMonitor
 from sopno.voice.listener import Listener
 from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
@@ -245,27 +244,70 @@ class SopnoAssistant:
         """
         Speak while watching the mic; returns True if the user interrupted.
 
-        When the user starts talking mid-reply, TTS stops immediately so Sopno
-        can listen — no waiting for the sentence to finish.
+        Barge-in detection runs IN the InputStream callback — no separate
+        thread, no frame consumption. The callback learns the TTS audio
+        baseline after a short delay (for ffplay startup), then sets a
+        threshold. If the user speaks louder than that during TTS,
+        barge_in fires.
         """
         if not getattr(settings, "barge_in_enabled", True):
             speak(text)
             return False
 
-        monitor = BargeInMonitor(log_callback=self.on_log_message, mic_stream=self.mic_stream)
-        monitor.start()
+        mic = self.mic_stream
+        multiplier = float(getattr(settings, "barge_in_multiplier", 2.0))
+        margin = float(getattr(settings, "barge_in_margin", 50))
+        confirm_blocks = 8
+        # ~0.77s of real TTS audio for baseline (12 blocks * 1024 frames @ 16kHz)
+        cal_blocks = 12
+        # ffplay startup latency — audio isn't audible until after this delay.
+        # Calibration MUST happen after this delay so baseline reflects real TTS.
+        _FFPLAY_STARTUP_DELAY_S = 0.5
+        _MIN_BASELINE = 200.0  # ignore ambient-noise baselines below this
+
+        mic.barge_in.clear()
+
+        def _on_play_start() -> None:
+            """Arm barge-in after TTS audio baseline is learned."""
+            def _calibrate_and_arm() -> None:
+                # Start calibration NOW — after ffplay has started producing audio.
+                # The callback will collect energy for cal_blocks (~0.77s).
+                mic.start_barge_calibration(cal_blocks)
+                threading.Timer(cal_blocks * 1024 / mic.rate + 0.1, _arm).start()
+
+            def _arm() -> None:
+                # Read back the baseline energy the callback collected
+                avg = mic._barge_baseline_avg
+                if avg and avg > _MIN_BASELINE:
+                    threshold = avg * multiplier + margin
+                    mic.set_barge_threshold(threshold, confirm_blocks=confirm_blocks)
+                    self.on_log_message(
+                        f"Barge-in armed: baseline={avg:.0f}, "
+                        f"threshold={threshold:.0f}"
+                    )
+                else:
+                    # Baseline too low (ambient noise only) — use floor-based threshold
+                    threshold = max(float(settings.energy_threshold_ceiling), _MIN_BASELINE * multiplier + margin)
+                    mic.set_barge_threshold(threshold, confirm_blocks=confirm_blocks)
+                    self.on_log_message(
+                        f"Barge-in armed: baseline={avg:.0f} too low, "
+                        f"using floor threshold={threshold:.0f}"
+                    )
+
+            # Delay calibration until ffplay audio is actually playing
+            threading.Timer(_FFPLAY_STARTUP_DELAY_S, _calibrate_and_arm).start()
+
         try:
             speak(
                 text,
-                should_stop=lambda: monitor.interrupted,
-                on_play_start=monitor.start_measurement,
+                should_stop=lambda: mic.barge_in.is_set(),
+                on_play_start=_on_play_start,
             )
         finally:
-            monitor.stop()
-            # Flush stale audio from the shared buffer so the listener
-            # doesn't pick up Sopno's own voice from the speakers.
+            mic.clear_barge()
+            mic._barge_baseline_avg = 0.0
             self.mic_stream.flush()
-        return monitor.interrupted
+        return mic.barge_in.is_set()
 
     def _deliver_reply(self, text: str, *, status: str = "speaking", barge_in: bool = True) -> None:
         """Show reply in UI; speak aloud only in voice mode."""

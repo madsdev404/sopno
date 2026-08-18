@@ -84,23 +84,6 @@ class TestPlaybackInterrupt(unittest.TestCase):
         proc.terminate.assert_not_called()
 
 
-class _FakeBargeMonitor:
-    """Stand-in for BargeInMonitor in assistant tests (no mic)."""
-
-    def __init__(self, log_callback=None) -> None:
-        self.log = log_callback or (lambda m: None)
-        self.interrupted = False
-
-    def start(self) -> None:
-        pass
-
-    def start_measurement(self) -> None:
-        pass
-
-    def stop(self) -> None:
-        pass
-
-
 class TestBargeInAssistant(unittest.TestCase):
     """Verifies the assistant orchestrates barge-in around TTS."""
 
@@ -111,36 +94,34 @@ class TestBargeInAssistant(unittest.TestCase):
             asst = SopnoAssistant()
             return asst
 
-    def test_barge_in_stops_speech_and_skips_settle(self) -> None:
+    def test_barge_in_stops_speech(self) -> None:
         asst = self._make_assistant()
-        monitor = _FakeBargeMonitor()
-        monitor.interrupted = True
         statuses = []
         asst.on_status_changed = lambda s: statuses.append(s)
+        # Simulate barge_in being set (callback-based detection)
+        asst.mic_stream.barge_in = MagicMock()
+        asst.mic_stream.barge_in.is_set = MagicMock(return_value=True)
 
-        with patch("sopno.core.assistant.BargeInMonitor", return_value=monitor) as mon_cls, patch(
-            "sopno.core.assistant.speak"
+        with patch("sopno.core.assistant.speak"
         ) as mock_speak, patch("sopno.core.assistant.time.sleep") as mock_sleep, patch(
             "sopno.core.assistant.settings.barge_in_enabled", True, create=True
         ):
             asst._deliver_reply("hello there")
 
-        mon_cls.assert_called_once()
-        # TTS got the interrupt hook and the baseline trigger
+        # TTS got the interrupt hook and the calibration trigger
         self.assertTrue(callable(mock_speak.call_args.kwargs["should_stop"]))
         self.assertTrue(callable(mock_speak.call_args.kwargs["on_play_start"]))
-        # No PulseAudio settle sleep needed — shared MicStream eliminates device race.
-        # Only the post-speech settle (_POST_SPEAK_SETTLE_S) should fire.
         self.assertEqual(statuses[-1], "listening")
 
     def test_no_barge_in_keeps_normal_settle(self) -> None:
         asst = self._make_assistant()
-        monitor = _FakeBargeMonitor()
         statuses = []
         asst.on_status_changed = lambda s: statuses.append(s)
+        # barge_in not set — no interruption
+        asst.mic_stream.barge_in = MagicMock()
+        asst.mic_stream.barge_in.is_set = MagicMock(return_value=False)
 
-        with patch("sopno.core.assistant.BargeInMonitor", return_value=monitor), patch(
-            "sopno.core.assistant.speak"
+        with patch("sopno.core.assistant.speak"
         ), patch("sopno.core.assistant.time.sleep") as mock_sleep, patch(
             "sopno.core.assistant.settings.barge_in_enabled", True, create=True
         ):
@@ -155,14 +136,13 @@ class TestBargeInAssistant(unittest.TestCase):
         statuses = []
         asst.on_status_changed = lambda s: statuses.append(s)
 
-        with patch("sopno.core.assistant.BargeInMonitor") as mon_cls, patch(
+        with patch(
             "sopno.core.assistant.speak"
         ) as mock_speak, patch("sopno.core.assistant.time.sleep") as mock_sleep, patch(
             "sopno.core.assistant.settings.barge_in_enabled", False, create=True
         ):
             asst._deliver_reply("hello")
 
-        mon_cls.assert_not_called()
         mock_speak.assert_called_once_with("hello")
         mock_sleep.assert_called_once()
 

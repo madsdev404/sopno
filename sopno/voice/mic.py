@@ -1,19 +1,21 @@
 """
 sopno/voice/mic.py
-━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━
 Single shared microphone stream with one InputStream callback.
 
 Opens ONE sounddevice InputStream and feeds audio into a single
-thread-safe bytearray buffer. All consumers (wake word, listener,
-barge-in) read sequentially from the same buffer — no fan-out,
-no stale audio, no frame consumption races.
+thread-safe bytearray buffer. All consumers (wake word, listener)
+read sequentially from the same buffer — no fan-out, no stale audio.
 
-Based on the voice-core pattern: single InputStream callback,
-Condition-based read, no ring buffer duplication.
+Barge-in detection happens IN the callback itself — no separate thread,
+no frame consumption. The callback computes RMS energy per block and
+sets a threading.Event when energy exceeds the barge-in threshold.
 """
 
 from __future__ import annotations
 
+import audioop
+import struct
 import threading
 import time
 from typing import Optional
@@ -25,9 +27,12 @@ class MicStream:
 
     Opens one sd.InputStream and writes all captured audio into a
     single bytearray buffer. Consumers call read() to get audio —
-    reading CONSUMES from the buffer (FIFO). This means callers
-    must coordinate access (wake word → listener → barge-in are
-    sequential in the assistant pipeline, so no locking needed).
+    reading CONSUMES from the buffer (FIFO).
+
+    Barge-in: call set_barge_threshold(energy) to arm detection.
+    When energy exceeds the threshold for enough consecutive blocks,
+    the barge_in Event is set. Check barge_in.is_set() from the
+    main thread — no separate monitoring thread needed.
     """
 
     def __init__(self, log_callback=None):
@@ -42,6 +47,18 @@ class MicStream:
         self._dtype = "int16"
         self._sample_width = 2  # int16 = 2 bytes
         self._started = False
+
+        # ── Barge-in detection (runs in the audio callback) ──────────
+        self._barge_threshold: Optional[float] = None  # None = disabled
+        self._barge_consecutive = 0
+        self._barge_need = 0  # consecutive blocks needed
+        self.barge_in = threading.Event()
+        # Calibration: collect energy for N blocks, then compute average
+        self._barge_cal_collecting = False
+        self._barge_cal_remaining = 0
+        self._barge_cal_sum = 0.0
+        self._barge_cal_count = 0
+        self._barge_baseline_avg = 0.0
 
     @property
     def rate(self) -> int:
@@ -132,8 +149,73 @@ class MicStream:
         with self._lock:
             self._buf.clear()
 
+    # ── Barge-in API ────────────────────────────────────────────────
+
+    def set_barge_threshold(self, energy: float, confirm_blocks: int = 8) -> None:
+        """
+        Arm barge-in detection. When RMS energy exceeds ``energy``
+        for ``confirm_blocks`` consecutive callback blocks (~64ms each),
+        ``self.barge_in`` is set.
+
+        Pass energy=0 or call clear_barge() to disarm.
+        """
+        if energy <= 0:
+            self.clear_barge()
+            return
+        with self._lock:
+            self._barge_threshold = energy
+            self._barge_consecutive = 0
+            self._barge_need = confirm_blocks
+            self.barge_in.clear()
+
+    def clear_barge(self) -> None:
+        """Disarm barge-in detection and clear the flag."""
+        with self._lock:
+            self._barge_threshold = None
+            self._barge_consecutive = 0
+            self._barge_cal_collecting = False
+            self.barge_in.clear()
+
+    def start_barge_calibration(self, num_blocks: int = 8) -> None:
+        """Start collecting energy samples in the callback to learn the
+        TTS audio baseline. After ``num_blocks`` blocks, the average
+        energy is stored in ``_barge_baseline_avg``."""
+        with self._lock:
+            self._barge_cal_collecting = True
+            self._barge_cal_remaining = num_blocks
+            self._barge_cal_sum = 0.0
+            self._barge_cal_count = 0
+
+    # ── Callback ────────────────────────────────────────────────────
+
     def _audio_callback(self, indata, frames, time_info, status) -> None:
-        """sounddevice callback — append audio to the shared buffer."""
+        """sounddevice callback — append audio + inline barge-in check."""
+        raw = indata.tobytes()
+        energy = float(audioop.rms(raw, 2))
+
+        with self._lock:
+            # Barge-in calibration: collect energy for N blocks
+            if self._barge_cal_collecting and self._barge_cal_remaining > 0:
+                self._barge_cal_sum += energy
+                self._barge_cal_count += 1
+                self._barge_cal_remaining -= 1
+                if self._barge_cal_remaining <= 0:
+                    self._barge_baseline_avg = (
+                        self._barge_cal_sum / self._barge_cal_count
+                        if self._barge_cal_count > 0 else 0.0
+                    )
+                    self._barge_cal_collecting = False
+
+            # Barge-in detection: check against threshold
+            if self._barge_threshold is not None:
+                if energy > self._barge_threshold:
+                    self._barge_consecutive += 1
+                    if self._barge_consecutive >= self._barge_need:
+                        self.barge_in.set()
+                        self._barge_threshold = None  # one-shot
+                else:
+                    self._barge_consecutive = max(0, self._barge_consecutive - 1)
+
         with self._cond:
-            self._buf.extend(indata.tobytes())
+            self._buf.extend(raw)
             self._cond.notify_all()
