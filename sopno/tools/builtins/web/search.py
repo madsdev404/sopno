@@ -199,10 +199,26 @@ def _bing_results(query: str, max_results: int) -> list[dict]:
     resp.raise_for_status()
     parser = _BingParser(max_results)
     parser.feed(resp.text)
-    return [
-        {"title": title, "url": url, "snippet": snippet}
-        for title, url, snippet in parser.results[:max_results]
-    ]
+
+    # Filter out low-quality dictionary/definition sidebar results
+    _LOW_QUALITY_HOSTS = {
+        "merriam-webster.com", "cambridge.org", "dictionary.com",
+        "longdo.com", "oxfordlearnersdictionaries.com", "collinsdictionary.com",
+        "vocabulary.com", "freedictionary.com",
+    }
+    filtered = []
+    for title, url, snippet in parser.results[:max_results * 2]:
+        try:
+            from urllib.parse import urlparse as _urlparse
+            host = _urlparse(url).hostname or ""
+            if any(h in host for h in _LOW_QUALITY_HOSTS):
+                continue
+        except Exception:
+            pass
+        filtered.append({"title": title, "url": url, "snippet": snippet})
+        if len(filtered) >= max_results:
+            break
+    return filtered[:max_results]
 
 
 def _ddg_results(query: str, max_results: int) -> list[dict]:
@@ -226,7 +242,7 @@ def _ddg_results(query: str, max_results: int) -> list[dict]:
 def web_search(
     query: str,
     max_results: int = 5,
-    engines: tuple[str, ...] = ("bing", "ddg"),
+    engines: tuple[str, ...] = ("ddg", "bing"),
 ) -> list[dict]:
     """
     Search the web across free engines and return merged, deduplicated results.
