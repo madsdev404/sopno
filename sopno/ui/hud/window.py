@@ -8,16 +8,16 @@ from __future__ import annotations
 
 import threading
 
-from PyQt5.QtCore import QSize, Qt
-from PyQt5.QtGui import QColor, QFont, QKeySequence
+from PyQt5.QtCore import QSize, Qt, QEvent
+from PyQt5.QtGui import QColor, QFont, QKeyEvent, QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
     QHBoxLayout,
     QLabel,
-    QLineEdit,
     QMainWindow,
+    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -30,7 +30,8 @@ from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, St
 from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE
-from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ModeToggle, VoiceModeOrb
+from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, VoiceModeOrb
+from sopno.ui.hud.widgets.holo_toggle import HoloToggle
 from sopno.ui.hud.worker import AssistantWorker
 
 
@@ -174,23 +175,25 @@ class SopnoHUDWindow(
         self.voice_orb.setVisible(False)
         voice_layout.addWidget(self.voice_orb, 1)
 
-        self.listening_chip = QPushButton()
-        self.listening_chip.setCursor(Qt.PointingHandCursor)
-        self.listening_chip.setFocusPolicy(Qt.NoFocus)
-        self.listening_chip.setFixedHeight(18)
-        self.listening_chip.setToolTip("Click to toggle wake word / always-on")
-        self.listening_chip.clicked.connect(self._toggle_listening_mode)
-        self._style_listening_chip()
-        voice_layout.addWidget(self.listening_chip, 0, Qt.AlignCenter)
+        # ── Controls row: wake toggle (left) + mode toggle (right) ─────
+        self._controls_row = QHBoxLayout()
+        self._controls_row.setContentsMargins(0, 0, 0, 0)
+        self._controls_row.setSpacing(6)
+        self._controls_row.addStretch(1)
 
-        self.listening_chip = QPushButton()
-        self.listening_chip.setCursor(Qt.PointingHandCursor)
-        self.listening_chip.setFocusPolicy(Qt.NoFocus)
-        self.listening_chip.setFixedHeight(18)
-        self.listening_chip.setToolTip("Click to toggle wake word / always-on")
-        self.listening_chip.clicked.connect(self._toggle_listening_mode)
-        self._style_listening_chip()
-        voice_layout.addWidget(self.listening_chip, 0, Qt.AlignCenter)
+        self.wake_toggle = HoloToggle("bell", "ear",
+            initial=(getattr(settings, "listening_mode", "wake_word") == "always_on"))
+        self.wake_toggle.setToolTip("Toggle wake word vs always-on listening")
+        self.wake_toggle.toggled.connect(self._on_wake_toggle)
+        self._controls_row.addWidget(self.wake_toggle, 0, Qt.AlignVCenter)
+
+        self.mode_toggle = HoloToggle("mic", "newspaper", initial=False)
+        self.mode_toggle.setToolTip("Toggle voice ↔ text mode")
+        self.mode_toggle.toggled.connect(self._on_mode_toggle)
+        self._controls_row.addWidget(self.mode_toggle, 0, Qt.AlignVCenter)
+        self._controls_row.addStretch(1)
+
+        voice_layout.addLayout(self._controls_row)
 
         # ── Compact transcript (voice mode) ───────────────────────────────────
         self.voice_transcript = QScrollArea()
@@ -267,12 +270,6 @@ class SopnoHUDWindow(
         except Exception:  # noqa: BLE001
             self.dashboard = None
 
-        # ── Mode toggle (always visible) ──────────────────────────────────────
-        self.mode_toggle = ModeToggle()
-        self.mode_toggle.mode_changed.connect(self.set_interaction_mode)
-        root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
-        root.addSpacing(6)
-
         # ── Composer (text mode only) ─────────────────────────────────────────
         self.dock = QFrame()
         self.dock.setObjectName("Dock")
@@ -287,12 +284,18 @@ class SopnoHUDWindow(
         dock_row.setContentsMargins(10, 6, 6, 6)
         dock_row.setSpacing(6)
 
-        self.text_input = QLineEdit()
+        self.text_input = QPlainTextEdit()
         self.text_input.setPlaceholderText("Type a message…")
         self.text_input.setToolTip("Type a message and press Enter to send")
         self.text_input.setFont(QFont("IBM Plex Sans", 10))
+        self.text_input.setFixedHeight(36)
+        self.text_input.setMinimumHeight(36)
+        self.text_input.setMaximumHeight(120)
+        self.text_input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_input.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_input.setTabChangesFocus(True)
         self.text_input.setStyleSheet("""
-            QLineEdit {
+            QPlainTextEdit {
                 background: transparent;
                 color: #E4EAF2;
                 border: none;
@@ -300,7 +303,8 @@ class SopnoHUDWindow(
                 selection-background-color: rgba(94, 177, 245, 0.35);
             }
         """)
-        self.text_input.returnPressed.connect(self.send_text_message)
+        self.text_input.document().contentsChanged.connect(self._schedule_resize_input)
+        self.text_input.installEventFilter(self)
 
         self.send_btn = self._circle_btn("send", tip="Send message", active=False, accent=False)
         self.send_btn.clicked.connect(self.send_text_message)
@@ -328,7 +332,6 @@ class SopnoHUDWindow(
 
         self.setCentralWidget(self.central_widget)
         self.apply_size_preset("medium", anchor_top_right=True)
-        self._style_listening_chip()
         self.position_hud()
 
     def showEvent(self, _event) -> None:
@@ -342,13 +345,40 @@ class SopnoHUDWindow(
     def keyPressEvent(self, event) -> None:
         super().keyPressEvent(event)
 
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self.text_input and event.type() == QEvent.KeyPress:
+            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                if event.modifiers() & Qt.ShiftModifier:
+                    return False
+                self.send_text_message()
+                return True
+        return super().eventFilter(obj, event)
+
     def _apply_mode_layout(self) -> None:
         is_text = self.interaction_mode == "text"
         self.dock.setVisible(is_text)
-        self.listening_chip.setVisible(not is_text)
-        self.mode_toggle.set_mode(self.interaction_mode, emit=False)
+        self.wake_toggle.setVisible(not is_text)
 
+        self.mode_toggle.blockSignals(True)
+        self.mode_toggle.setChecked(is_text)
+        self.mode_toggle.blockSignals(False)
+
+        self.wake_toggle.blockSignals(True)
+        self.wake_toggle.setChecked(getattr(settings, "listening_mode", "wake_word") == "always_on")
+        self.wake_toggle.blockSignals(False)
+
+        root = self._root
         if is_text:
+            self._controls_row.removeWidget(self.wake_toggle)
+            self.wake_toggle.setParent(self.central_widget)
+            dock_idx = root.indexOf(self.dock)
+            if dock_idx >= 0:
+                root.insertWidget(dock_idx, self.wake_toggle, 0, Qt.AlignHCenter)
+            else:
+                root.addWidget(self.wake_toggle, 0, Qt.AlignHCenter)
+            self._controls_row.removeWidget(self.mode_toggle)
+            self.mode_toggle.setParent(self.central_widget)
+            root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
             self.voice_stage.setVisible(False)
             self.text_stage.setVisible(True)
             self.chat.setVisible(True)
@@ -356,6 +386,12 @@ class SopnoHUDWindow(
             self.context_label.setText("Type a message")
             self.text_input.setFocus()
         else:
+            root.removeWidget(self.wake_toggle)
+            self.wake_toggle.setParent(self.voice_stage)
+            self._controls_row.insertWidget(1, self.wake_toggle, 0, Qt.AlignVCenter)
+            root.removeWidget(self.mode_toggle)
+            self.mode_toggle.setParent(self.voice_stage)
+            self._controls_row.insertWidget(2, self.mode_toggle, 0, Qt.AlignVCenter)
             self.voice_stage.setVisible(True)
             self.voice_orb.setVisible(True)
             self.text_stage.setVisible(False)
@@ -388,13 +424,23 @@ class SopnoHUDWindow(
         if hasattr(self, "worker") and self.worker:
             self.worker.set_listening_mode(mode)
             self.worker.log_message.emit(f"Listening mode → {mode}")
-        self._style_listening_chip()
+        self.wake_toggle.blockSignals(True)
+        self.wake_toggle.setChecked(mode == "always_on")
+        self.wake_toggle.blockSignals(False)
         if self.interaction_mode == "voice" and self.current_status in ("standby", "listening"):
             if mode == "wake_word":
                 wake_words_str = ", ".join(getattr(settings, "wake_words", ["dream"]))
                 self.context_label.setText(f"Say '{wake_words_str}'…")
             else:
                 self.context_label.setText(self._listen_hint)
+
+    def _on_wake_toggle(self, checked: bool) -> None:
+        mode = "always_on" if checked else "wake_word"
+        self.set_listening_mode(mode)
+
+    def _on_mode_toggle(self, checked: bool) -> None:
+        mode = "text" if checked else "voice"
+        self.set_interaction_mode(mode)
 
     def _add_transcript_line(self, role: str, text: str) -> None:
         """Add a compact line to the voice mode transcript."""
@@ -423,6 +469,10 @@ class SopnoHUDWindow(
                 w.deleteLater()
                 self._transcript_count -= 1
 
+        from PyQt5.QtCore import QTimer as _QTimer
+        _QTimer.singleShot(10, self._scroll_transcript_to_bottom)
+
+    def _scroll_transcript_to_bottom(self) -> None:
         bar = self.voice_transcript.verticalScrollBar()
         bar.setValue(bar.maximum())
 
@@ -457,6 +507,16 @@ class SopnoHUDWindow(
             kind = "restore" if self._is_maximized else "maximize"
             ic = getattr(self, "_metrics", {}).get("icon", 14)
             btn.setIcon(_paint_icon(kind, ic, active=False))
+
+    def _auto_resize_input(self) -> None:
+        doc = self.text_input.document()
+        doc.setTextWidth(self.text_input.viewport().width())
+        h = int(doc.size().height()) + 14
+        self.text_input.setFixedHeight(max(36, min(h, 120)))
+
+    def _schedule_resize_input(self) -> None:
+        from PyQt5.QtCore import QTimer as _QTimer
+        _QTimer.singleShot(0, self._auto_resize_input)
 
     def close_app(self) -> None:
         if hasattr(self, "worker") and self.worker:

@@ -1,13 +1,12 @@
 """
 sopno/ui/hud/behaviors/chrome.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Header chrome, circular buttons, listening chip, and composer mixin.
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Header chrome, circular buttons, and composer mixin.
 """
 
 from PyQt5.QtCore import QSize, Qt
 from PyQt5.QtWidgets import QPushButton
 
-from sopno.config.settings import settings
 from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import _CHROME, _ICON_BTN
 
@@ -50,56 +49,12 @@ class ChromeMixin:
         ))
         return btn
 
-    def _style_listening_chip(self) -> None:
-        mode = getattr(settings, "listening_mode", "wake_word")
-        is_wake = mode == "wake_word"
-        text = "🔔 Wake" if is_wake else "🎤 Always"
-        self.listening_chip.setText(text)
-        self.listening_chip.setChecked(is_wake)
-        self.listening_chip.setFixedWidth(68)
-        if is_wake:
-            self.listening_chip.setStyleSheet("""
-                QPushButton {
-                    background: rgba(155, 140, 242, 0.15);
-                    color: #C4B8F0;
-                    border: 1px solid rgba(155, 140, 242, 0.25);
-                    border-radius: 9px;
-                    font-size: 8px;
-                    font-weight: 600;
-                    padding: 0px 6px;
-                }
-                QPushButton:hover {
-                    background: rgba(155, 140, 242, 0.25);
-                    border-color: rgba(155, 140, 242, 0.40);
-                }
-            """)
-        else:
-            self.listening_chip.setStyleSheet("""
-                QPushButton {
-                    background: rgba(74, 222, 154, 0.15);
-                    color: #A0F0C8;
-                    border: 1px solid rgba(74, 222, 154, 0.25);
-                    border-radius: 9px;
-                    font-size: 8px;
-                    font-weight: 600;
-                    padding: 0px 6px;
-                }
-                QPushButton:hover {
-                    background: rgba(74, 222, 154, 0.25);
-                    border-color: rgba(74, 222, 154, 0.40);
-                }
-            """)
-
     def send_text_message(self) -> None:
-        text = self.text_input.text().strip()
+        text = self.text_input.toPlainText().strip()
         if not text:
             return
         self.text_input.clear()
+        self.text_input.setFixedHeight(36)
         self.chat.add_message("user", text)
         if hasattr(self, "worker") and self.worker:
             self.worker.submit_text(text)
-
-    def _toggle_listening_mode(self) -> None:
-        current = getattr(settings, "listening_mode", "wake_word")
-        new_mode = "always_on" if current == "wake_word" else "wake_word"
-        self.set_listening_mode(new_mode)

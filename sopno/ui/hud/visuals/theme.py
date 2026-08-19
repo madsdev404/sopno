@@ -51,11 +51,14 @@ _SEGMENT = """
         padding: {pad_v}px {pad_h}px;
         font-size: {font_size}px;
         font-weight: 600;
-        letter-spacing: 0.2px;
+        letter-spacing: 0.3px;
     }}
     QPushButton:hover {{
         background: {hover_bg};
         color: {hover_fg};
+    }}
+    QPushButton:pressed {{
+        background: {pressed_bg};
     }}
 """
 

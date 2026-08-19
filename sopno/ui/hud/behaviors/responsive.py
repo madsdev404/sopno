@@ -26,7 +26,7 @@ class ResponsiveMixin:
                 context_pt=8, face=56, status_pt=7, tag_pt=7, body_pt=8,
                 bubble_pad=7, bubble_r=10, bubble_gap=6, log_pt=6,
                 send=28, send_icon=14, mode_pad_v=3, mode_pad_h=8,
-                mode_font=9, mode_icon=11, mode_r=12, show_status=False, show_log=False,
+                mode_font=9, mode_icon=14, mode_r=12, show_status=False, show_log=False,
                 hint="Listening…",
             )
         elif w < 440:
@@ -35,7 +35,7 @@ class ResponsiveMixin:
                 context_pt=8, face=78, status_pt=8, tag_pt=7, body_pt=9,
                 bubble_pad=8, bubble_r=12, bubble_gap=7, log_pt=6,
                 send=30, send_icon=15, mode_pad_v=4, mode_pad_h=10,
-                mode_font=10, mode_icon=12, mode_r=14, show_status=True, show_log=True,
+                mode_font=10, mode_icon=14, mode_r=12, show_status=True, show_log=True,
                 hint="Listening… say something",
             )
         else:
@@ -44,7 +44,7 @@ class ResponsiveMixin:
                 context_pt=9, face=110, status_pt=9, tag_pt=8, body_pt=10,
                 bubble_pad=10, bubble_r=14, bubble_gap=8, log_pt=7,
                 send=34, send_icon=17, mode_pad_v=5, mode_pad_h=12,
-                mode_font=11, mode_icon=13, mode_r=16, show_status=True, show_log=True,
+                mode_font=11, mode_icon=14, mode_r=12, show_status=True, show_log=True,
                 hint="Listening… say something",
             )
 
@@ -65,7 +65,7 @@ class ResponsiveMixin:
 
         pad = m["margin"]
         self._root.setContentsMargins(pad, pad - 2, pad - 2, pad - 2)
-        radius = 8 if self.width() < 320 else (10 if self.width() < 440 else 10)
+        radius = 8 if self.width() < 320 else 10
         self.central_widget.setStyleSheet(f"""
             QWidget#CentralWidget {{
                 background-color: rgba(12, 16, 24, {settings.hud_opacity});
