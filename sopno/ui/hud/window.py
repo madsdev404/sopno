@@ -131,6 +131,23 @@ class SopnoHUDWindow(
         self.context_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         self.context_label.setMaximumHeight(20)
 
+        # ── TEXT-page presence: tiny robot + working status ("Idle"/…) in the
+        # same top line. Voice mode keeps the dot + hint instead —
+        # _apply_mode_layout swaps which group is visible. ──────────────────
+        self.robot = AliveRobotFace(size=22)
+        self.robot.set_state("standby")
+        self.robot.setVisible(False)
+
+        self.status_label = QLabel("Idle")
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.status_label.setFont(QFont("IBM Plex Sans", 8, QFont.Medium))
+        self.status_label.setStyleSheet(
+            "color: #8B9BB4; background: transparent; letter-spacing: 0.4px;"
+        )
+        self.status_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.status_label.setMaximumHeight(20)
+        self.status_label.setVisible(False)
+
         # ── Window controls ───────────────────────────────────────────────────
         self._win_btns: dict[str, QPushButton] = {}
 
@@ -166,6 +183,8 @@ class SopnoHUDWindow(
         chrome.addWidget(self.close_btn, 0, Qt.AlignVCenter)
 
         header.addWidget(self.context_label, 1)
+        header.addWidget(self.robot, 0, Qt.AlignVCenter)
+        header.addWidget(self.status_label, 1)
         header.addLayout(chrome)
         root.addLayout(header)
         root.addSpacing(4)
@@ -240,8 +259,9 @@ class SopnoHUDWindow(
 
         root.addWidget(self.voice_stage, 1)
 
-        # ── Text mode is about the TEXT. Presence shrinks to a minimal
-        # robot + state word pinned top-left; the transcript owns the page. ──
+        # ── Text mode is about the TEXT: the transcript owns the whole
+        # stage. Its presence line (robot + working status) lives in the
+        # header and is swapped in by _apply_mode_layout. ────────────────────
         self.text_stage = QFrame()
         self.text_stage.setObjectName("TextStage")
         self.text_stage.setStyleSheet("QFrame#TextStage { background: transparent; }")
@@ -249,23 +269,6 @@ class SopnoHUDWindow(
         text_layout = QVBoxLayout(self.text_stage)
         text_layout.setContentsMargins(0, 0, 0, 0)
         text_layout.setSpacing(2)
-
-        presence_row = QHBoxLayout()
-        presence_row.setContentsMargins(2, 0, 0, 0)
-        presence_row.setSpacing(7)
-
-        self.robot = AliveRobotFace(size=30)
-        presence_row.addWidget(self.robot, 0, Qt.AlignVCenter)
-
-        self.status_label = QLabel("Idle")
-        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
-        self.status_label.setFont(QFont("IBM Plex Sans", 8, QFont.Medium))
-        self.status_label.setStyleSheet(
-            "color: #8B9BB4; background: transparent; letter-spacing: 0.4px;"
-        )
-        presence_row.addWidget(self.status_label, 0, Qt.AlignVCenter)
-        presence_row.addStretch(1)
-        text_layout.addLayout(presence_row)
 
         root.addWidget(self.text_stage, 1)
 
@@ -443,9 +446,13 @@ class SopnoHUDWindow(
             self.text_stage.setVisible(True)
             self.chat.setVisible(True)
             self.voice_transcript.setVisible(False)
+            # Text page presence: robot + working status (no dot, no hint).
+            self.status_dot.setVisible(False)
+            self.context_label.setVisible(False)
+            self.robot.setVisible(True)
+            self.status_label.setVisible(True)
             self._sync_hero()
             self._sync_hero_geometry()
-            self.context_label.setText("Type a message")
             self.text_input.setFocus()
             self._start_placeholder_cycle()
         else:
@@ -460,6 +467,11 @@ class SopnoHUDWindow(
             self.text_stage.setVisible(False)
             self.chat.setVisible(False)
             self.voice_transcript.setVisible(True)
+            # Voice page presence: dot + hint (robot stays text-page only).
+            self.status_dot.setVisible(True)
+            self.context_label.setVisible(True)
+            self.robot.setVisible(False)
+            self.status_label.setVisible(False)
             self._stop_placeholder_cycle()
             self.hero.collapse()
             m = getattr(self, "_metrics", None)

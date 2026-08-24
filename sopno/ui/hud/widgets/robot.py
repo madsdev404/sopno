@@ -145,14 +145,6 @@ class AliveRobotFace(QWidget):
         p.setPen(QPen(QColor(a.red(), a.green(), a.blue(), 40), 1.0))
         p.drawRoundedRect(panel, radius * 0.55, radius * 0.55)
 
-        ant_y = head.top() - h * 0.02
-        p.setPen(QPen(QColor(60, 72, 90), 1.8))
-        p.drawLine(QPointF(cx, head.top() + 2), QPointF(cx, ant_y))
-        pulse = 0.55 + 0.45 * self._breath
-        p.setPen(Qt.NoPen)
-        p.setBrush(QColor(a.red(), a.green(), a.blue(), int(170 * pulse)))
-        p.drawEllipse(QPointF(cx, ant_y - 3), 3.2, 3.2)
-
         ear_pulse = 1.0 + (0.12 * abs(math.sin(self._t * 6)) if self.state == "listening" else 0)
         ear_h = head_h * 0.22 * ear_pulse
         ear_w = head_w * 0.08

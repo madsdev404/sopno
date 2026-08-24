@@ -342,10 +342,8 @@ class SopnoAssistant:
                     # Flush stale TTS audio captured by mic through speakers
                     self.mic_stream.flush()
                 time.sleep(_POST_SPEAK_SETTLE_S)
-            else:
-                # Text mode: brief "speaking" flash for avatar, no TTS
-                self.on_status_changed(status)
-                time.sleep(0.35)
+            # Text mode: no TTS — the reply is already on screen; keep the
+            # status word honest (Thinking… → Idle), no fake "Speaking".
 
     def _deliver_reminder(self, text: str) -> None:
         """Deliver a fired reminder from the background poller thread."""
@@ -357,10 +355,6 @@ class SopnoAssistant:
                 self.on_status_changed("speaking")
                 self._speak_with_barge_in(text)
                 self.on_status_changed("listening")
-            else:
-                self.on_status_changed("speaking")
-                time.sleep(0.35)
-                self.on_status_changed("standby")
         self.on_log_message(f"[Reminder] Delivered: {text}")
 
     def _deliver_rule(self, text: str) -> None:
@@ -373,10 +367,6 @@ class SopnoAssistant:
                 self.on_status_changed("speaking")
                 self._speak_with_barge_in(text)
                 self.on_status_changed("listening")
-            else:
-                self.on_status_changed("speaking")
-                time.sleep(0.35)
-                self.on_status_changed("standby")
         self.on_log_message(f"[Rule] Fired: {text}")
 
     def _await_command(self) -> Optional[str]:
