@@ -46,3 +46,7 @@ class AssistantWorker(QObject):
 
     def submit_text(self, text: str) -> None:
         self.assistant.submit_text(text)
+
+    def stop_generation(self) -> None:
+        """Abandon the in-flight turn (Stop button / Esc while generating)."""
+        self.assistant.request_stop()

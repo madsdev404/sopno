@@ -1,9 +1,10 @@
 """
 sopno/ui/hud/visuals/theme.py
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 Shared constants and QSS templates for the HUD package.
 """
 
+from sopno.config.settings import settings
 from PyQt5.QtGui import QColor
 
 SIZE_PRESETS = {
@@ -13,6 +14,11 @@ SIZE_PRESETS = {
 }
 MIN_SIZE = (260, 320)
 EDGE = 8
+
+
+def motion_enabled() -> bool:
+    """True when HUD animations should run (respects hud_reduced_motion)."""
+    return not getattr(settings, "hud_reduced_motion", False)
 
 STATUS_COPY = {
     "standby":   ("Idle", "#8B9BB4"),

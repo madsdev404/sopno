@@ -88,8 +88,16 @@ class ModeToggle(QFrame):
         self.text_btn.clicked.connect(lambda: self._on_click("text"))
         self._apply_style()
 
-    def apply_scale(self, **kw) -> None:
-        pass
+    def apply_scale(self, *, pad_v: int = 4, pad_h: int = 10,
+                    font: int = 10, icon: int = 14, radius: int = 12) -> None:
+        self._pv = pad_v
+        self._ph = pad_h
+        self._icon_sz = icon
+        self._frame_r = radius
+        height = icon + pad_v * 2 + 8
+        self.voice_btn.setFixedHeight(height)
+        self.text_btn.setFixedHeight(height)
+        self._apply_style()
 
     def set_mode(self, mode: str, *, emit: bool = False) -> None:
         mode = "text" if mode == "text" else "voice"

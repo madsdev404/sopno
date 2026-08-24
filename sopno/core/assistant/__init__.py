@@ -158,6 +158,23 @@ class SopnoAssistant:
         self._text_event = threading.Event()
         self._mode_lock = threading.Lock()
 
+        # Cooperative cancel for the in-flight turn (HUD Stop button / Esc).
+        # Checked at slow-path checkpoints inside _process_command.
+        self._turn_stop = threading.Event()
+
+    def request_stop(self) -> bool:
+        """Ask the pipeline to abandon the current turn (Stop while generating).
+
+        Returns True when a stop was newly requested. The flag is consumed by
+        the next checkpoint in _process_command and cleared when the turn ends,
+        so it never leaks into a later turn.
+        """
+        if self._turn_stop.is_set():
+            return False
+        self._turn_stop.set()
+        self.on_log_message("Stop requested…")
+        return True
+
     def stop(self) -> None:
         """Stop the assistant loop."""
         self.running = False
@@ -521,6 +538,17 @@ class SopnoAssistant:
 
         return None
 
+    def _stopped_mid_turn(self) -> bool:
+        """True when Stop was requested for the turn now being processed."""
+        if not self._turn_stop.is_set():
+            return False
+        # Drop the just-added user message so the context stays consistent.
+        if self.context.raw_messages and self.context.raw_messages[-1]["role"] == "user":
+            self.context.raw_messages.pop()
+        self.on_log_message("Generation stopped.")
+        self.on_status_changed("standby")
+        return True
+
     def _process_command(self, cmd_text: str) -> bool:
         """
         Run dispatcher / LLM for one command.
@@ -610,6 +638,9 @@ class SopnoAssistant:
         else:
             self.on_log_message("Querying Ollama (fast chat, no tools)…")
 
+        if self._stopped_mid_turn():
+            return True
+
         self.context.add_user_message(cmd_text)
         chat_messages = self.context.get_messages_for_llm()
 
@@ -626,6 +657,8 @@ class SopnoAssistant:
                 chat_messages.append(response_msg)
 
                 for tool in tool_calls:
+                    if self._stopped_mid_turn():
+                        return True
                     # Ollama may return dicts or objects
                     fn = tool["function"] if isinstance(tool, dict) else tool.function
                     name = fn["name"] if isinstance(fn, dict) else fn.name
@@ -649,6 +682,9 @@ class SopnoAssistant:
             else:
                 assistant_reply = response_msg.get("content", "")
 
+            if self._stopped_mid_turn():
+                return True
+
             assistant_reply_clean = re.sub(r"[*_`#\-]", " ", assistant_reply or "")
             assistant_reply_clean = re.sub(r"\s+", " ", assistant_reply_clean).strip()
 
@@ -664,6 +700,9 @@ class SopnoAssistant:
             self._deliver_reply(error_speech)
             if self.context.raw_messages and self.context.raw_messages[-1]["role"] == "user":
                 self.context.raw_messages.pop()
+        finally:
+            # Consume any stop request so it never leaks into the next turn.
+            self._turn_stop.clear()
 
         return True
 

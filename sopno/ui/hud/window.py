@@ -8,12 +8,13 @@ from __future__ import annotations
 
 import threading
 
-from PyQt5.QtCore import QSize, Qt, QEvent
-from PyQt5.QtGui import QColor, QFont, QKeyEvent, QKeySequence
+from PyQt5.QtCore import QSize, Qt, QEvent, QRect, QTimer
+from PyQt5.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
     QGraphicsDropShadowEffect,
+    QGraphicsOpacityEffect,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -29,9 +30,10 @@ from sopno.config.settings import settings
 from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, StatusMixin, TrayMixin
 from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
-from sopno.ui.hud.visuals.theme import MIN_SIZE
-from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, VoiceModeOrb
+from sopno.ui.hud.visuals.theme import MIN_SIZE, motion_enabled
+from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
+from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.worker import AssistantWorker
 
 
@@ -57,6 +59,8 @@ class SopnoHUDWindow(
         self._listen_hint = "Listening… say something"
         self._is_maximized = False
         self._prev_geo = None
+        self._generating = False
+        self._ph_idx = 0
 
         self.init_ui()
         self.init_tray()
@@ -76,7 +80,7 @@ class SopnoHUDWindow(
     def _init_shortcuts(self) -> None:
         from PyQt5.QtWidgets import QShortcut
         QShortcut(QKeySequence("Ctrl+Q"), self, self.close_app)
-        QShortcut(QKeySequence("Escape"), self, self.hide_hud)
+        QShortcut(QKeySequence("Escape"), self, self._escape_pressed)
         QShortcut(QKeySequence("Ctrl+M"), self, self._toggle_maximize)
         QShortcut(QKeySequence("Ctrl+D"), self, self._toggle_dashboard)
         QShortcut(QKeySequence("Ctrl+T"), self, lambda: self.set_interaction_mode("text"))
@@ -111,11 +115,15 @@ class SopnoHUDWindow(
         root.setSpacing(0)
         self._root = root
 
-        # ── Header (always visible) ───────────────────────────────────────────
+        # ── Header (always visible): status line · mode toggle · chrome ──────
         header = QHBoxLayout()
         header.setContentsMargins(0, 0, 0, 0)
         header.setSpacing(6)
         self._header = header
+
+        self.status_dot = StatusDot()
+        self.status_dot.set_state("standby")
+        header.addWidget(self.status_dot, 0, Qt.AlignVCenter)
 
         self.context_label = QLabel(self._listen_hint)
         self.context_label.setFont(QFont("IBM Plex Sans", 8))
@@ -232,103 +240,145 @@ class SopnoHUDWindow(
 
         root.addWidget(self.voice_stage, 1)
 
-        # ── Text mode: robot face + chat thread ───────────────────────────────
+        # ── Text mode is about the TEXT. Presence shrinks to a minimal
+        # robot + state word pinned top-left; the transcript owns the page. ──
         self.text_stage = QFrame()
         self.text_stage.setObjectName("TextStage")
         self.text_stage.setStyleSheet("QFrame#TextStage { background: transparent; }")
         self.text_stage.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         text_layout = QVBoxLayout(self.text_stage)
         text_layout.setContentsMargins(0, 0, 0, 0)
-        text_layout.setSpacing(4)
-        text_layout.setAlignment(Qt.AlignCenter)
+        text_layout.setSpacing(2)
 
-        self.robot = AliveRobotFace(size=100)
-        text_layout.addWidget(self.robot, 0, Qt.AlignCenter)
+        presence_row = QHBoxLayout()
+        presence_row.setContentsMargins(2, 0, 0, 0)
+        presence_row.setSpacing(7)
+
+        self.robot = AliveRobotFace(size=30)
+        presence_row.addWidget(self.robot, 0, Qt.AlignVCenter)
 
         self.status_label = QLabel("Idle")
-        self.status_label.setAlignment(Qt.AlignCenter)
-        self.status_label.setFont(QFont("IBM Plex Sans", 9, QFont.Medium))
+        self.status_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        self.status_label.setFont(QFont("IBM Plex Sans", 8, QFont.Medium))
         self.status_label.setStyleSheet(
-            "color: #8B9BB4; background: transparent; letter-spacing: 0.5px;"
+            "color: #8B9BB4; background: transparent; letter-spacing: 0.4px;"
         )
-        text_layout.addWidget(self.status_label, 0, Qt.AlignCenter)
+        presence_row.addWidget(self.status_label, 0, Qt.AlignVCenter)
+        presence_row.addStretch(1)
+        text_layout.addLayout(presence_row)
 
         root.addWidget(self.text_stage, 1)
 
         # ── Chat thread (text mode) ───────────────────────────────────────────
         self.chat = ChatThread()
         self.chat.setMinimumHeight(80)
-        root.addWidget(self.chat, 1)
+        text_layout.addWidget(self.chat, 1)
+
+        # Empty-state hero floats over the transcript region (§5.3); it is
+        # geometry-synced to the chat and collapses on the first message.
+        self.hero = TextHero(self.text_stage)
+        self.hero.compose_requested.connect(self._hero_compose)
+        self.hero.hide()
         root.addSpacing(6)
 
-        # ── Dashboard ─────────────────────────────────────────────────────────
+        # ── Dashboard: overlay sheet above the transcript (§5.10) ────────────
         self.dashboard = None
+        self._dash_backdrop = QWidget(self.central_widget)
+        self._dash_backdrop.setStyleSheet("background: rgba(0, 0, 0, 0.35);")
+        self._dash_backdrop.setAttribute(Qt.WA_TransparentForMouseEvents, False)
+        self._dash_backdrop.mousePressEvent = lambda _e: self._close_dashboard()
+        self._dash_backdrop.hide()
         try:
-            self.dashboard = DashboardPanel()
-            root.addWidget(self.dashboard, 0)
-            self.dashboard.setVisible(False)
+            self.dashboard = DashboardPanel(self.central_widget)
+            self.dashboard.hide()
         except Exception:  # noqa: BLE001
             self.dashboard = None
+            self._dash_backdrop.hide()
 
         # ── Composer (text mode only) ─────────────────────────────────────────
+        # ChatGPT-style anatomy (research §composer): the textarea and the
+        # send/stop button are ONE rounded container; the button anchors to
+        # the bottom-right so it rides down as the field grows, and the whole
+        # dock lights up with a focus ring. Heights derive from font metrics,
+        # never magic pixels.
+        self._dock_focused = False
         self.dock = QFrame()
         self.dock.setObjectName("Dock")
-        self.dock.setStyleSheet("""
-            QFrame#Dock {
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.07);
-                border-radius: 18px;
-            }
-        """)
+        self.dock.setProperty("focused", False)
         dock_row = QHBoxLayout(self.dock)
-        dock_row.setContentsMargins(10, 6, 6, 6)
-        dock_row.setSpacing(6)
+        dock_row.setContentsMargins(12, 7, 8, 7)
+        dock_row.setSpacing(8)
 
         self.text_input = QPlainTextEdit()
         self.text_input.setPlaceholderText("Type a message…")
-        self.text_input.setToolTip("Type a message and press Enter to send")
+        self.text_input.setToolTip("Type a message and press Enter to send\nShift+Enter for a new line")
         self.text_input.setFont(QFont("IBM Plex Sans", 10))
-        self.text_input.setFixedHeight(36)
-        self.text_input.setMinimumHeight(36)
-        self.text_input.setMaximumHeight(120)
-        self.text_input.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.text_input.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
         self.text_input.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_input.setTabChangesFocus(True)
+        self.text_input.document().setDocumentMargin(0)
         self.text_input.setStyleSheet("""
             QPlainTextEdit {
                 background: transparent;
                 color: #E4EAF2;
                 border: none;
-                padding: 6px 4px;
+                padding: 0px 2px;
                 selection-background-color: rgba(94, 177, 245, 0.35);
             }
+            QScrollBar:vertical { background: transparent; width: 3px; }
+            QScrollBar::handle:vertical {
+                background: rgba(255,255,255,0.14); border-radius: 1px;
+            }
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
         """)
         self.text_input.document().contentsChanged.connect(self._schedule_resize_input)
+        self.text_input.textChanged.connect(self._sync_composer_enabled)
         self.text_input.installEventFilter(self)
+
+        # Send ⇄ Stop lives in a bottom-pinned slot: centered on a single-line
+        # composer, anchored bottom-right once the field grows multiline.
+        btn_slot = QWidget()
+        btn_slot.setAttribute(Qt.WA_TranslucentBackground)
+        btn_slot_lay = QVBoxLayout(btn_slot)
+        btn_slot_lay.setContentsMargins(0, 0, 0, 1)
+        btn_slot_lay.addStretch(1)
 
         self.send_btn = self._circle_btn("send", tip="Send message", active=False, accent=False)
         self.send_btn.clicked.connect(self.send_text_message)
+        btn_slot_lay.addWidget(self.send_btn)
 
         dock_row.addWidget(self.text_input, 1)
-        dock_row.addWidget(self.send_btn, 0, Qt.AlignVCenter)
+        dock_row.addWidget(btn_slot, 0)
         root.addWidget(self.dock)
         root.addSpacing(4)
 
+        # ── Footer strip: context meter · 1-line log · resize hint (§5.9) ────
+        self.footer_strip = QFrame()
+        self.footer_strip.setObjectName("FooterStrip")
+        self.footer_strip.setStyleSheet("QFrame#FooterStrip { background: transparent; }")
+        footer_row = QHBoxLayout(self.footer_strip)
+        footer_row.setContentsMargins(2, 0, 2, 0)
+        footer_row.setSpacing(8)
+
+        self.context_meter = ContextMeter()
+        footer_row.addWidget(self.context_meter, 0, Qt.AlignVCenter)
+
         self.log_display = QLabel("Starting…")
-        self.log_display.setAlignment(Qt.AlignCenter)
+        self.log_display.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
         self.log_display.setFont(QFont("IBM Plex Mono", 7))
         self.log_display.setStyleSheet("color: #3F4D63; background: transparent;")
-        self.log_display.setWordWrap(True)
-        root.addWidget(self.log_display)
+        self.log_display.setWordWrap(False)
+        self.log_display.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+        self.log_display.setMaximumHeight(16)
+        footer_row.addWidget(self.log_display, 1)
 
-        grip_row = QHBoxLayout()
-        grip_row.addStretch(1)
         self.resize_hint = QLabel("⋰")
         self.resize_hint.setToolTip("Drag edges or corner to resize")
         self.resize_hint.setStyleSheet("color: #3A4658; background: transparent; font-size: 11px;")
         self.resize_hint.setFixedSize(16, 14)
-        grip_row.addWidget(self.resize_hint)
-        root.addLayout(grip_row)
+        footer_row.addWidget(self.resize_hint, 0, Qt.AlignVCenter)
+
+        root.addWidget(self.footer_strip)
 
         self.setCentralWidget(self.central_widget)
         self.apply_size_preset("medium", anchor_top_right=True)
@@ -341,17 +391,27 @@ class SopnoHUDWindow(
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive()
+        if getattr(self, "dashboard", None) is not None and self.dashboard.isVisible():
+            self.dashboard.setGeometry(self._dash_rect())
+            self._dash_backdrop.setGeometry(self.central_widget.rect())
 
     def keyPressEvent(self, event) -> None:
         super().keyPressEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self.text_input and event.type() == QEvent.KeyPress:
-            if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                if event.modifiers() & Qt.ShiftModifier:
-                    return False
-                self.send_text_message()
-                return True
+        if obj is self.text_input:
+            if event.type() == QEvent.KeyPress:
+                if event.key() in (Qt.Key_Return, Qt.Key_Enter):
+                    if event.modifiers() & Qt.ShiftModifier:
+                        return False
+                    self.send_text_message()
+                    return True
+            elif event.type() in (QEvent.FocusIn, QEvent.FocusOut):
+                # Focus ring on the whole composer container (research rule).
+                focused = event.type() == QEvent.FocusIn
+                if focused != self._dock_focused:
+                    self._dock_focused = focused
+                    self._style_dock()
         return super().eventFilter(obj, event)
 
     def _apply_mode_layout(self) -> None:
@@ -383,8 +443,11 @@ class SopnoHUDWindow(
             self.text_stage.setVisible(True)
             self.chat.setVisible(True)
             self.voice_transcript.setVisible(False)
+            self._sync_hero()
+            self._sync_hero_geometry()
             self.context_label.setText("Type a message")
             self.text_input.setFocus()
+            self._start_placeholder_cycle()
         else:
             root.removeWidget(self.wake_toggle)
             self.wake_toggle.setParent(self.voice_stage)
@@ -397,6 +460,8 @@ class SopnoHUDWindow(
             self.text_stage.setVisible(False)
             self.chat.setVisible(False)
             self.voice_transcript.setVisible(True)
+            self._stop_placeholder_cycle()
+            self.hero.collapse()
             m = getattr(self, "_metrics", None)
             face_size = m["face"] if m else 110
             self.voice_orb.face.set_face_size(face_size)
@@ -406,6 +471,53 @@ class SopnoHUDWindow(
                     self.context_label.setText(f"Say '{wake_words_str}'…")
                 else:
                     self.context_label.setText(self._listen_hint)
+
+    def _on_mode_toggle(self, checked: bool) -> None:
+        mode = "text" if checked else "voice"
+        self.set_interaction_mode(mode)
+
+    # ── Empty-state hero ──────────────────────────────────────────────────
+    def _hero_compose(self, text: str) -> None:
+        """Chip click fills the composer — never auto-sends (§5.3)."""
+        self.text_input.setPlainText(text)
+        cursor = self.text_input.textCursor()
+        cursor.movePosition(cursor.End)
+        self.text_input.setTextCursor(cursor)
+        self.text_input.setFocus()
+
+    def _sync_hero_geometry(self) -> None:
+        """Keep the hero exactly over the transcript region."""
+        if not hasattr(self, "hero"):
+            return
+        g = self.chat.geometry()
+        self.hero.setGeometry(g.adjusted(0, 0, 0, 0))
+        self.hero.raise_()
+
+    # ── Bilingual placeholder cycle (§5.8) ───────────────────────────────
+    _PLACEHOLDERS = ("Type a message…", "লিখুন…")
+
+    def _start_placeholder_cycle(self) -> None:
+        if getattr(self, "_ph_timer", None) is not None or not motion_enabled():
+            return
+        self._ph_idx = 0
+        self.text_input.setPlaceholderText(self._PLACEHOLDERS[0])
+        timer = QTimer(self)
+        timer.setInterval(6000)
+        timer.timeout.connect(self._cycle_placeholder)
+        timer.start()
+        self._ph_timer = timer
+
+    def _stop_placeholder_cycle(self) -> None:
+        timer = getattr(self, "_ph_timer", None)
+        if timer is not None:
+            timer.stop()
+            self._ph_timer = None
+
+    def _cycle_placeholder(self) -> None:
+        if self.text_input.toPlainText():
+            return  # user is typing — leave them alone
+        self._ph_idx = (self._ph_idx + 1) % len(self._PLACEHOLDERS)
+        self.text_input.setPlaceholderText(self._PLACEHOLDERS[self._ph_idx])
 
     def set_interaction_mode(self, mode: str) -> None:
         mode = mode.lower().strip()
@@ -437,10 +549,6 @@ class SopnoHUDWindow(
     def _on_wake_toggle(self, checked: bool) -> None:
         mode = "always_on" if checked else "wake_word"
         self.set_listening_mode(mode)
-
-    def _on_mode_toggle(self, checked: bool) -> None:
-        mode = "text" if checked else "voice"
-        self.set_interaction_mode(mode)
 
     def _add_transcript_line(self, role: str, text: str) -> None:
         """Add a compact line to the voice mode transcript."""
@@ -476,13 +584,97 @@ class SopnoHUDWindow(
         bar = self.voice_transcript.verticalScrollBar()
         bar.setValue(bar.maximum())
 
+    def _escape_pressed(self) -> None:
+        """Esc priority: close dashboard → stop generating → hide HUD."""
+        if self.dashboard is not None and self.dashboard.isVisible():
+            self._close_dashboard()
+            return
+        if getattr(self, "_generating", False):
+            self.stop_generation()
+            return
+        self.hide_hud()
+
+    # ── Dashboard overlay sheet (§5.10) ──────────────────────────────────
+    def _dash_rect(self, *, offscreen: bool = False) -> QRect:
+        """Target geometry: transcript region expanded, right-aligned sheet."""
+        m = getattr(self, "_metrics", None) or self._metrics_for_width(self.width())
+        w = self.central_widget.width()
+        h = self.central_widget.height()
+        pad = max(0, m["margin"] - 2)
+        top = pad + m["chrome"] + 4          # header bottom
+        avail = max(80, w - pad * 2)
+        if self.width() < 320:
+            dw = avail
+        elif self.width() < 440:
+            dw = min(320, avail)
+        else:
+            dw = min(360, avail)
+        x = w - pad - dw
+        if offscreen:
+            x = w                             # parked just past the right edge
+        return QRect(x, top, dw, max(60, h - top - pad))
+
     def _toggle_dashboard(self) -> None:
         if self.dashboard is None:
             return
-        visible = not self.dashboard.isVisible()
-        self.dashboard.setVisible(visible)
-        if visible and hasattr(self.dashboard, "refresh"):
+        if self.dashboard.isVisible():
+            self._close_dashboard()
+        else:
+            self._open_dashboard()
+
+    def _open_dashboard(self) -> None:
+        if self.dashboard is None or self.dashboard.isVisible():
+            return
+        if hasattr(self.dashboard, "refresh"):
             self.dashboard.refresh()
+        target = self._dash_rect()
+        start = self._dash_rect(offscreen=True)
+        self._dash_backdrop.setGeometry(self.central_widget.rect())
+        self._dash_backdrop.show()
+        self._dash_backdrop.raise_()
+        self.dashboard.setGeometry(start)
+        self.dashboard.show()
+        self.dashboard.raise_()
+        if not motion_enabled():
+            self.dashboard.setGeometry(target)
+            return
+        from PyQt5.QtCore import QEasingCurve, QPropertyAnimation
+
+        slide = QPropertyAnimation(self.dashboard, b"geometry", self.dashboard)
+        slide.setDuration(260)
+        slide.setStartValue(start)
+        slide.setEndValue(target)
+        slide.setEasingCurve(QEasingCurve.OutCubic)
+        slide.start(QPropertyAnimation.DeleteWhenStopped)
+        self._dash_anim = slide
+
+        effect = QGraphicsOpacityEffect(self._dash_backdrop)
+        self._dash_backdrop.setGraphicsEffect(effect)
+        fade = QPropertyAnimation(effect, b"opacity", self._dash_backdrop)
+        fade.setDuration(260)
+        fade.setStartValue(0.0)
+        fade.setEndValue(1.0)
+        fade.setEasingCurve(QEasingCurve.OutCubic)
+        fade.start(QPropertyAnimation.DeleteWhenStopped)
+
+    def _close_dashboard(self) -> None:
+        if self.dashboard is None or not self.dashboard.isVisible():
+            return
+        if not motion_enabled():
+            self.dashboard.hide()
+            self._dash_backdrop.hide()
+            return
+        from PyQt5.QtCore import QEasingCurve, QPropertyAnimation
+
+        exit_rect = self._dash_rect(offscreen=True)
+        slide = QPropertyAnimation(self.dashboard, b"geometry", self.dashboard)
+        slide.setDuration(260)
+        slide.setStartValue(self.dashboard.geometry())
+        slide.setEndValue(exit_rect)
+        slide.setEasingCurve(QEasingCurve.OutCubic)
+        slide.finished.connect(lambda: (self.dashboard.hide(), self._dash_backdrop.hide()))
+        slide.start(QPropertyAnimation.DeleteWhenStopped)
+        self._dash_anim = slide
 
     def position_hud(self) -> None:
         screen = QApplication.primaryScreen().availableGeometry()
@@ -509,14 +701,65 @@ class SopnoHUDWindow(
             btn.setIcon(_paint_icon(kind, ic, active=False))
 
     def _auto_resize_input(self) -> None:
-        doc = self.text_input.document()
-        doc.setTextWidth(self.text_input.viewport().width())
-        h = int(doc.size().height()) + 14
-        self.text_input.setFixedHeight(max(36, min(h, 120)))
+        """Auto-grow bound by max height — derived from font metrics.
+
+        QTextDocument.size() is unreliable for plain-text documents (it can
+        report block counts instead of pixels), so the wrapped line count is
+        measured directly with QFontMetrics. setFixedHeight triggers layout,
+        which can re-enter here via resizeEvent → _apply_responsive; the
+        guard turns that cycle into a no-op instead of a stack overflow.
+        """
+        if getattr(self, "_resizing_input", False):
+            return
+        self._resizing_input = True
+        try:
+            inp = self.text_input
+            fm = QFontMetrics(inp.font())
+            min_h = fm.height() + 14                  # one comfortable line
+            # Measure slightly narrow so a scrollbar appearing/disappearing
+            # cannot flip the wrap count back and forth.
+            width = max(40, inp.viewport().width() - 3)
+            h = self._input_content_height(width) + 12
+            inp.setFixedHeight(int(max(min_h, min(h, 120))))
+        finally:
+            self._resizing_input = False
+
+    def _input_content_height(self, width: int) -> int:
+        """Pixel height of the editor's text incl. soft-wrapped lines."""
+        inp = self.text_input
+        doc = inp.document()
+        fm = QFontMetrics(inp.font())
+        lines = 0
+        for i in range(doc.blockCount()):
+            text = doc.findBlockByNumber(i).text()
+            if not text:
+                lines += 1
+                continue
+            br = fm.boundingRect(QRect(0, 0, width, 10000), Qt.TextWordWrap, text)
+            lines += max(1, -(-br.height() // fm.height()))
+        return int(lines * fm.height() + doc.documentMargin() * 2)
 
     def _schedule_resize_input(self) -> None:
         from PyQt5.QtCore import QTimer as _QTimer
         _QTimer.singleShot(0, self._auto_resize_input)
+
+    def _style_dock(self) -> None:
+        """Composer container style: glass at rest, focus ring when active."""
+        m = getattr(self, "_metrics", None) or {}
+        radius = max(14, m.get("mode_r", 12) + 2)
+        if self._dock_focused:
+            border = "rgba(94, 177, 245, 0.38)"
+            bg = "rgba(255, 255, 255, 0.055)"
+        else:
+            border = "rgba(255, 255, 255, 0.07)"
+            bg = "rgba(255, 255, 255, 0.04)"
+        self.dock.setStyleSheet(f"""
+            QFrame#Dock {{
+                background: {bg};
+                border: 1px solid {border};
+                border-radius: {radius}px;
+            }}
+        """)
 
     def close_app(self) -> None:
         if hasattr(self, "worker") and self.worker:

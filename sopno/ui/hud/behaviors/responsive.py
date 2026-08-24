@@ -23,35 +23,39 @@ class ResponsiveMixin:
         if w < 320:
             base = dict(
                 margin=8, gap=4, chrome=20, icon=12, chrome_font=12,
-                context_pt=8, face=56, status_pt=7, tag_pt=7, body_pt=8,
+                context_pt=8, face=56, mini_face=24, status_pt=7, tag_pt=7, body_pt=8,
                 bubble_pad=7, bubble_r=10, bubble_gap=6, log_pt=6,
                 send=28, send_icon=14, mode_pad_v=3, mode_pad_h=8,
                 mode_font=9, mode_icon=14, mode_r=12, show_status=False, show_log=False,
                 hint="Listening…",
+                avatar=14, ts_visible=False, copy_visible=False,
+                hero_face=52, footer_strip="hidden",
             )
         elif w < 440:
             base = dict(
                 margin=10, gap=6, chrome=22, icon=14, chrome_font=13,
-                context_pt=8, face=78, status_pt=8, tag_pt=7, body_pt=9,
+                context_pt=8, face=78, mini_face=27, status_pt=8, tag_pt=7, body_pt=9,
                 bubble_pad=8, bubble_r=12, bubble_gap=7, log_pt=6,
                 send=30, send_icon=15, mode_pad_v=4, mode_pad_h=10,
                 mode_font=10, mode_icon=14, mode_r=12, show_status=True, show_log=True,
                 hint="Listening… say something",
+                avatar=16, ts_visible=True, copy_visible=True,
+                hero_face=72, footer_strip="log",
             )
         else:
             base = dict(
                 margin=14, gap=8, chrome=24, icon=15, chrome_font=14,
-                context_pt=9, face=110, status_pt=9, tag_pt=8, body_pt=10,
+                context_pt=9, face=110, mini_face=30, status_pt=9, tag_pt=8, body_pt=10,
                 bubble_pad=10, bubble_r=14, bubble_gap=8, log_pt=7,
                 send=34, send_icon=17, mode_pad_v=5, mode_pad_h=12,
                 mode_font=11, mode_icon=14, mode_r=12, show_status=True, show_log=True,
                 hint="Listening… say something",
+                avatar=20, ts_visible=True, copy_visible=True,
+                hero_face=100, footer_strip="full",
             )
 
         if is_voice:
             base["face"] = min(base["face"] + 30, 150)
-        else:
-            base["face"] = 56
 
         return base
 
@@ -95,13 +99,27 @@ class ResponsiveMixin:
 
         self._refresh_win_btns()
 
-        self.robot.set_face_size(m["face"])
         if hasattr(self, "voice_orb") and self.voice_orb:
-            face = m["face"]
-            self.voice_orb.face.set_face_size(face)
-        self.status_label.setVisible(m["show_status"])
-        self.status_label.setFont(QFont("IBM Plex Sans", m["status_pt"], QFont.Medium))
-        self.log_display.setVisible(m["show_log"])
+            self.voice_orb.face.set_face_size(m["face"])
+        if hasattr(self, "robot") and self.robot:
+            # Text mode keeps presence minimal: a tiny face top-left.
+            self.robot.set_face_size(m["mini_face"])
+        if hasattr(self, "status_label") and self.status_label:
+            self.status_label.setFont(
+                QFont("IBM Plex Sans", m["status_pt"], QFont.Medium)
+            )
+        if hasattr(self, "hero") and self.hero:
+            self.hero.apply_scale(
+                pt=m["body_pt"],
+                pv=max(2, m["mode_pad_v"] - 1),
+                ph=m["mode_pad_h"],
+            )
+        footer = m["footer_strip"]
+        if hasattr(self, "footer_strip"):
+            self.footer_strip.setVisible(footer != "hidden")
+            self.log_display.setVisible(footer in ("log", "full"))
+            self.context_meter.setVisible(footer == "full")
+            self.resize_hint.setVisible(footer == "full")
         self.log_display.setFont(QFont("IBM Plex Mono", m["log_pt"]))
 
         self.mode_toggle.apply_scale(
@@ -111,27 +129,17 @@ class ResponsiveMixin:
             icon=m["mode_icon"],
             radius=m["mode_r"],
         )
-        self.chat.apply_scale(
-            tag_pt=m["tag_pt"],
-            body_pt=m["body_pt"],
-            pad=m["bubble_pad"],
-            radius=m["bubble_r"],
-            gap=m["bubble_gap"],
-        )
+        self.chat.apply_scale(body_pt=m["body_pt"])
+        # §4.3: cap the transcript measure on wide windows (~70ch column).
+        self.chat.set_column_width(560 if self.width() >= 440 else None)
 
         kind = self.send_btn.property("icon_kind") or "send"
         self.send_btn.setFixedSize(m["send"], m["send"])
         self.send_btn.setIconSize(QSize(m["send_icon"], m["send_icon"]))
         self.send_btn.setIcon(_paint_icon(kind, m["send"], active=False))
         self.text_input.setFont(QFont("IBM Plex Sans", m["body_pt"]))
-
-        self.dock.setStyleSheet(f"""
-            QFrame#Dock {{
-                background: rgba(255, 255, 255, 0.04);
-                border: 1px solid rgba(255, 255, 255, 0.07);
-                border-radius: {max(12, m['mode_r'])}px;
-            }}
-        """)
+        self._auto_resize_input()          # min height follows the font size
+        self._style_dock()                 # radius/border from current metrics
 
         self._apply_mode_layout()
 

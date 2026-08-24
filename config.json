@@ -24,6 +24,7 @@
   "barge_in_confirm_ms": 500,
   "hud_opacity": 0.85,
   "hud_position": "top-right",
+  "hud_reduced_motion": false,
   "memory_path": "sopno/memory/memory.db",
   "memory_max_tokens": 400,
   "memory_recall_limit": 8,

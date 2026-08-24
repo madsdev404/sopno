@@ -94,6 +94,8 @@ class Settings:
         # ── HUD ───────────────────────────────────────────────
         self.hud_opacity: float     = data.get("hud_opacity", 0.85)
         self.hud_position: str      = data.get("hud_position", "top-right")
+        # Accessibility: disable bubble entrance tweens, dot pulses, caret blink.
+        self.hud_reduced_motion: bool = bool(data.get("hud_reduced_motion", False))
 
         # ── Context ───────────────────────────────────────────
         # 1 system prompt + 6 complete turns (12 messages) = 13 before summarization

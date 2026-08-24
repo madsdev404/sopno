@@ -36,6 +36,8 @@ All project docs live here, organized to mirror the codebase layout.
 |-----|-------------|
 | [DESIGN.md](hud/DESIGN.md) | **Visual design guide** — colors, glassmorphism, glow effects, component specs, full CSS theme |
 | [PYWEBVIEW.md](hud/PYWEBVIEW.md) | **Implementation guide** — pywebview setup, Python bridge, HTML/CSS/JS frontend, assistant integration |
+| [voice-mode-ui-design.md](voice-mode-ui-design.md) | **Voice page spec** — orb research (ChatGPT/Gemini/Siri), 8-layer QPainter design, animation constants |
+| [text-mode-ui-design.md](text-mode-ui-design.md) | **Text page spec** — full research digest, component placement, responsive token map, motion spec, phased implementation plan |
 
 ## Modules
 
@@ -60,6 +62,8 @@ Docs for specific packages (mirrors `sopno/`):
 ```
 doc/
 ├── README.md                 ← you are here
+├── voice-mode-ui-design.md   ← voice page UI spec (complete)
+├── text-mode-ui-design.md    ← text page UI spec + implementation plan
 ├── getting-started/
 │   ├── installation.md
 │   └── user-guide.md
