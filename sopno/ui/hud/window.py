@@ -359,6 +359,15 @@ class SopnoHUDWindow(
         if layout.indexOf(widget) >= 0:
             layout.removeWidget(widget)
 
+    def _insert_mode_gap(self) -> None:
+        root = self._root
+        gap = getattr(self, "_mode_gap", None)
+        if gap is not None and root.indexOf(gap) >= 0:
+            return
+        dock_idx = root.indexOf(self.dock)
+        if dock_idx >= 0:
+            self._mode_gap = root.insertSpacing(dock_idx, 6)
+
     def _apply_mode_layout(self) -> None:
         is_text = self.interaction_mode == "text"
         self.dock.setVisible(is_text)
@@ -386,7 +395,12 @@ class SopnoHUDWindow(
             self._take_from_layout(self._controls_row, self.mode_toggle)
             if root.indexOf(self.mode_toggle) < 0:
                 self.mode_toggle.setParent(self.central_widget)
-                root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
+                dock_idx = root.indexOf(self.dock)
+                if dock_idx >= 0:
+                    root.insertWidget(dock_idx, self.mode_toggle, 0, Qt.AlignHCenter)
+                else:
+                    root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
+                self._insert_mode_gap()
 
             self.voice_stage.setVisible(False)
             self.text_stage.setVisible(True)
@@ -406,6 +420,10 @@ class SopnoHUDWindow(
                 self._controls_row.insertWidget(1, self.wake_toggle, 0, Qt.AlignVCenter)
 
             self._take_from_layout(root, self.mode_toggle)
+            gap = getattr(self, "_mode_gap", None)
+            if gap is not None:
+                root.removeItem(gap)
+                self._mode_gap = None
             self.mode_toggle.setParent(self.voice_stage)
             if self._controls_row.indexOf(self.mode_toggle) < 0:
                 self._controls_row.insertWidget(2, self.mode_toggle, 0, Qt.AlignVCenter)

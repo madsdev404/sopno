@@ -11,9 +11,23 @@ from PyQt5.QtGui import QFont, QFontMetrics
 from PyQt5.QtWidgets import QFrame, QHBoxLayout, QPlainTextEdit, QPushButton, QVBoxLayout, QWidget
 
 from sopno.ui.hud.visuals.icons import _paint_icon
-from sopno.ui.hud.visuals.theme import _ICON_BTN
 
 _MAX_INPUT_H = 120
+
+_ICON_BTN_STATUS = """
+    QPushButton {{
+        background: {bg};
+        border: none;
+        border-radius: {radius}px;
+        padding: 0px;
+    }}
+    QPushButton:hover {{
+        background: {hover_bg};
+    }}
+    QPushButton:pressed {{
+        background: {pressed_bg};
+    }}
+"""
 
 
 class ChatComposer(QFrame):
@@ -44,20 +58,7 @@ class ChatComposer(QFrame):
         self.text_input.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
         self.text_input.setTabChangesFocus(True)
         self.text_input.document().setDocumentMargin(0)
-        self.text_input.setStyleSheet("""
-            QPlainTextEdit {
-                background: transparent;
-                color: #E8EEF7;
-                border: none;
-                padding: 1px 2px;
-                selection-background-color: rgba(94, 177, 245, 0.35);
-            }
-            QScrollBar:vertical { background: transparent; width: 3px; }
-            QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.14); border-radius: 1px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        """)
+        self.text_input.setStyleSheet(self._input_stylesheet(1))
         self.text_input.document().contentsChanged.connect(self._schedule_resize)
         self.text_input.textChanged.connect(self._sync_send_state)
         self.text_input.installEventFilter(self)
@@ -86,6 +87,28 @@ class ChatComposer(QFrame):
         QTimer.singleShot(0, self._auto_resize)
 
     # ── Public API ───────────────────────────────────────────────────────────
+    def _input_stylesheet(self, pad_v: int) -> str:
+        return f"""
+            QPlainTextEdit {{
+                background: transparent;
+                color: #E8EEF7;
+                border: none;
+                padding: {pad_v}px 2px;
+                selection-background-color: rgba(94, 177, 245, 0.35);
+            }}
+            QScrollBar:vertical {{ background: transparent; width: 3px; }}
+            QScrollBar::handle:vertical {{
+                background: rgba(255,255,255,0.14); border-radius: 1px;
+            }}
+            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{ height: 0; }}
+        """
+
+    def _center_input_padding(self) -> None:
+        inp = self.text_input
+        line_h = QFontMetrics(inp.font()).height()
+        pad = max(1, min(8, (inp.height() - line_h) // 2))
+        inp.setStyleSheet(self._input_stylesheet(pad))
+
     def apply_scale(self, *, body_pt: int, send: int = 32, send_icon: int = 16,
                     mode_r: int = 12, **_ignored) -> None:
         self._metrics = {"send": send, "send_icon": send_icon, "mode_r": mode_r}
@@ -156,38 +179,33 @@ class ChatComposer(QFrame):
             active = True
             self.send_btn.setToolTip("Stop generating")
             self.send_btn.setEnabled(True)
-            bg = "rgba(240, 113, 120, 0.14)"
-            border = "rgba(240, 113, 120, 0.55)"
-            hbg, hb = "rgba(240, 113, 120, 0.22)", "rgba(240, 113, 120, 0.70)"
-            pbg = "rgba(240, 113, 120, 0.32)"
+            bg = "rgba(240, 113, 120, 0.86)"
+            hbg = "rgba(240, 113, 120, 0.94)"
+            pbg = "rgba(240, 113, 120, 1.0)"
         elif has_text:
             kind = "send"
             active = True
             self.send_btn.setToolTip("Send message")
             self.send_btn.setEnabled(True)
-            bg = "rgba(94, 177, 245, 0.88)"
-            border = "rgba(94, 177, 245, 0.95)"
-            hbg, hb = "rgba(110, 190, 255, 0.95)", "rgba(130, 200, 255, 1.0)"
+            bg = "rgba(94, 177, 245, 0.90)"
+            hbg = "rgba(110, 190, 255, 0.96)"
             pbg = "rgba(80, 165, 235, 1.0)"
         else:
             kind = "send"
             active = False
             self.send_btn.setToolTip("Send message")
             self.send_btn.setEnabled(False)
-            bg = "rgba(255, 255, 255, 0.04)"
-            border = "rgba(255, 255, 255, 0.08)"
-            hbg, hb = "rgba(255, 255, 255, 0.07)", "rgba(255, 255, 255, 0.12)"
-            pbg = "rgba(255, 255, 255, 0.10)"
+            bg = "rgba(255, 255, 255, 0.05)"
+            hbg = "rgba(255, 255, 255, 0.09)"
+            pbg = "rgba(255, 255, 255, 0.14)"
 
         self.send_btn.setProperty("icon_kind", kind)
         self.send_btn.setIconSize(QSize(icon, icon))
         self.send_btn.setIcon(_paint_icon(kind, size, active=active))
-        self.send_btn.setStyleSheet(_ICON_BTN.format(
-            bg=bg, border=border, hover_bg=hbg, hover_border=hb, pressed_bg=pbg,
-        ))
+        self.send_btn.setStyleSheet(_ICON_BTN_STATUS.format(bg=bg, hover_bg=hbg, pressed_bg=pbg, radius=size // 2))
 
     def _apply_shell_style(self) -> None:
-        radius = max(16, self._metrics.get("mode_r", 12) + 4)
+        radius = max(16, min(self.height() // 2, 24))
         if self._focused:
             border = "rgba(94, 177, 245, 0.42)"
             bg = "rgba(255, 255, 255, 0.065)"
@@ -218,6 +236,8 @@ class ChatComposer(QFrame):
             inp.setFixedHeight(int(max(min_h, min(h, _MAX_INPUT_H))))
         finally:
             self._resizing = False
+        self._center_input_padding()
+        self._apply_shell_style()
 
     def _content_height(self, width: int) -> int:
         inp = self.text_input
