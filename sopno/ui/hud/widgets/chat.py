@@ -10,7 +10,8 @@ import html as _html
 from datetime import datetime
 
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QColor, QFont, QPainter, QPainterPath, QTextBlockFormat, QTextCursor
+from PyQt5.QtGui import (QColor, QFont, QPainter, QPainterPath,
+                         QTextBlockFormat, QTextCursor, QTextLine)
 from PyQt5.QtWidgets import QTextBrowser
 
 _MAX_BLOCKS = 60
@@ -259,12 +260,13 @@ class ChatThread(QTextBrowser):
         right = bottom = 0.0
         for i in range(layout.lineCount()):
             line = layout.lineAt(i)
-            lx = ox + line.x()
+            start = line.textStart()
+            line_left = ox + line.cursorToX(start, QTextLine.Leading)[0]
+            line_right = ox + line.cursorToX(start + line.textLength(), QTextLine.Trailing)[0]
             ly = oy + line.y()
-            lw = max(line.naturalTextWidth(), line.width())
             lh = line.height()
-            left = min(left, lx)
-            right = max(right, lx + lw)
+            left = min(left, line_left)
+            right = max(right, line_right)
             top = min(top, ly)
             bottom = max(bottom, ly + lh)
         if left is float("inf"):
@@ -289,9 +291,13 @@ class ChatThread(QTextBrowser):
         return 0.0
 
     def _paint_origin(self) -> tuple[float, float]:
-        """Map document coords → viewport painter coords."""
-        m = self.viewportMargins()
-        return float(m.left()), float(m.top()) - self.verticalScrollBar().value()
+        """Paint coords == doc coords (up to vertical scroll).
+
+        QTextBrowser already shifts the document (and our painted bubbles)
+        by the viewport margins; the only extra translation we must add is
+        the scroll offset, otherwise the margin cancels the bubble padding.
+        """
+        return 0.0, -float(self.verticalScrollBar().value())
 
     def _bubble_rect(self, left: float, top: float, right: float, bottom: float, *,
                      origin_x: float, origin_y: float, doc_x: float,
