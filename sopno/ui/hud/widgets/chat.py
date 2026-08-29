@@ -88,7 +88,7 @@ class ChatThread(QTextBrowser):
         """)
         self.setViewportMargins(*_VIEWPORT_MARGINS)
         self.document().setDefaultFont(QFont("IBM Plex Sans", 10))
-        self.document().setDocumentMargin(2)
+        self.document().setDocumentMargin(_BUBBLE_PAD_Y)
 
         self._blocks: list[dict] = []
         self._typing = False
@@ -214,6 +214,7 @@ class ChatThread(QTextBrowser):
         if not self._blocks and not self._typing:
             return
         doc_w = self._doc_width()
+        comp = _BUBBLE_PAD_Y - 2.0
         block = self.document().firstBlock()
         idx = 0
         while block.isValid() and idx < len(self._blocks):
@@ -228,12 +229,12 @@ class ChatThread(QTextBrowser):
             if role == "user":
                 fmt.setAlignment(Qt.AlignRight)
                 max_w = doc_w * _USER_MAX_RATIO
-                fmt.setLeftMargin(max(0.0, doc_w - max_w))
-                fmt.setRightMargin(_BUBBLE_PAD_X)
+                fmt.setLeftMargin(max(0.0, doc_w - max_w - comp))
+                fmt.setRightMargin(_BUBBLE_PAD_X - comp)
             else:
                 fmt.setAlignment(Qt.AlignLeft)
-                fmt.setLeftMargin(_BUBBLE_PAD_X)
-                fmt.setRightMargin(max(0.0, doc_w - doc_w * _ASSIST_MAX_RATIO))
+                fmt.setLeftMargin(_BUBBLE_PAD_X - comp)
+                fmt.setRightMargin(max(0.0, doc_w - doc_w * _ASSIST_MAX_RATIO - comp))
 
             QTextCursor(block).setBlockFormat(fmt)
             block = block.next()
@@ -244,8 +245,8 @@ class ChatThread(QTextBrowser):
             fmt.setAlignment(Qt.AlignLeft)
             fmt.setTopMargin(_GAP_SEPARATE + _BUBBLE_PAD_Y if self._blocks else _BUBBLE_PAD_Y)
             fmt.setBottomMargin(_BUBBLE_PAD_Y)
-            fmt.setLeftMargin(_BUBBLE_PAD_X)
-            fmt.setRightMargin(max(0.0, doc_w - doc_w * _ASSIST_MAX_RATIO))
+            fmt.setLeftMargin(_BUBBLE_PAD_X - comp)
+            fmt.setRightMargin(max(0.0, doc_w - doc_w * _ASSIST_MAX_RATIO - comp))
             QTextCursor(block).setBlockFormat(fmt)
 
     @staticmethod
@@ -420,5 +421,7 @@ class ChatThread(QTextBrowser):
                 f'<p style="margin:0;">'
                 f'<span style="color:{_C_MUTED}; letter-spacing:2px;">{_DOTS}</span></p>'
             )
+
+        parts.append('<p style="margin:0; font-size:4px; color:transparent;">&nbsp;</p>')
 
         return "".join(parts) or '<p style="margin:0;"></p>'
