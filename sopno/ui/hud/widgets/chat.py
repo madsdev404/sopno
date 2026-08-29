@@ -9,10 +9,12 @@ from QTextBlock layout.
 import html as _html
 from datetime import datetime
 
-from PyQt5.QtCore import Qt
+from PyQt5.QtCore import QPointF, QRect, Qt, QTimer
 from PyQt5.QtGui import (QColor, QFont, QPainter, QPainterPath,
                          QTextBlockFormat, QTextCursor, QTextLine)
 from PyQt5.QtWidgets import QTextBrowser
+
+from sopno.ui.hud.visuals.theme import motion_enabled
 
 _MAX_BLOCKS = 60
 _DOTS = "\u25cf\u00a0\u00a0\u25cb\u00a0\u00a0\u25cf"
@@ -32,6 +34,11 @@ _USER_MAX_RATIO = 0.78
 _ASSIST_MAX_RATIO = 0.82
 _GAP_GROUPED = 8
 _GAP_SEPARATE = 20
+
+_DOT_R = 2.6
+_DOT_GAP = 6.0
+_DOT_AMP = 5.0
+_DOT_PERIOD = 1.0
 
 
 def _bubble_path(x: float, y: float, w: float, h: float, *,
@@ -92,6 +99,10 @@ class ChatThread(QTextBrowser):
 
         self._blocks: list[dict] = []
         self._typing = False
+        self._dots_clock = 0.0
+        self._dots_timer = QTimer(self)
+        self._dots_timer.setInterval(33)
+        self._dots_timer.timeout.connect(self._tick_dots)
         self._follow = True
         self._col_width: int | None = None
 
@@ -140,16 +151,23 @@ class ChatThread(QTextBrowser):
         if not self._typing:
             self._typing = True
             self._scroll_to_bottom = True
+            self._dots_clock = 0.0
+            if motion_enabled():
+                self._dots_timer.start()
             self._render()
 
     def end_typing(self) -> None:
         if self._typing:
             self._typing = False
+            self._dots_timer.stop()
+            self._dots_clock = 0.0
             self._render()
 
     def clear_chat(self) -> None:
         self._blocks.clear()
         self._typing = False
+        self._dots_timer.stop()
+        self._dots_clock = 0.0
         self._render()
 
     @property
@@ -284,6 +302,7 @@ class ChatThread(QTextBrowser):
     def paintEvent(self, event) -> None:
         self._paint_bubbles()
         super().paintEvent(event)
+        self._paint_typing_dots()
 
     def _doc_x_offset(self, content_w: float) -> float:
         doc_w = self.document().textWidth()
@@ -380,6 +399,86 @@ class ChatThread(QTextBrowser):
         bar = self.verticalScrollBar()
         self._follow = value >= bar.maximum() - 6
 
+    def _typing_block(self):
+        idx = 0
+        block = self.document().begin()
+        while block.isValid():
+            if idx == len(self._blocks):
+                return block
+            block = block.next()
+            idx += 1
+        return None
+
+    def _typing_dot_rect(self) -> QRect | None:
+        if not self._typing:
+            return None
+        block = self._typing_block()
+        if block is None:
+            return None
+        br = self.document().documentLayout().blockBoundingRect(block)
+        if br.height() < 1:
+            return None
+        bounds = self._text_bounds(block, br)
+        if bounds is None:
+            return None
+        left, top, right, bottom = bounds
+        ox, oy = self._paint_origin()
+        x = int(ox + self._doc_x_offset(self._content_width()) + left - _BUBBLE_PAD_X)
+        y = int(oy + top - _BUBBLE_PAD_Y)
+        return QRect(x, y,
+                     int(right - left) + _BUBBLE_PAD_X * 2,
+                     int(bottom - top) + _BUBBLE_PAD_Y * 2)
+
+    def _tick_dots(self) -> None:
+        if not self._typing:
+            self._dots_timer.stop()
+            return
+        self._dots_clock += 0.033
+        rect = self._typing_dot_rect()
+        if rect is None:
+            self.viewport().update()
+        else:
+            self.viewport().update(rect)
+
+    def _paint_typing_dots(self) -> None:
+        if not self._typing:
+            return
+        block = self._typing_block()
+        if block is None:
+            return
+        br = self.document().documentLayout().blockBoundingRect(block)
+        if br.height() < 1:
+            return
+        bounds = self._text_bounds(block, br)
+        if bounds is None:
+            return
+        left, top, right, bottom = bounds
+        content_w = self._content_width()
+        doc_x = self._doc_x_offset(content_w)
+        ox, oy = self._paint_origin()
+        px = ox + doc_x + left
+        cy = oy + (top + bottom) / 2.0
+
+        p = QPainter(self.viewport())
+        if not p.isActive():
+            return
+        p.setRenderHint(QPainter.Antialiasing)
+        p.setPen(Qt.NoPen)
+        p.setBrush(QColor(_C_MUTED))
+
+        active = self._dots_timer.isActive()
+        cx = px + _DOT_R
+        for i in range(3):
+            yoff = 0.0
+            if active and motion_enabled():
+                t = (self._dots_clock / _DOT_PERIOD + i / 3.0) % 1.0
+                if t < 0.4:
+                    k = t / 0.4
+                    yoff = -_DOT_AMP * (1.0 - k * k)
+            p.drawEllipse(QPointF(cx, cy + yoff), _DOT_R, _DOT_R)
+            cx += _DOT_R * 2 + _DOT_GAP
+        p.end()
+
     def _render(self) -> None:
         bar = self.verticalScrollBar()
         stick = getattr(self, "_scroll_to_bottom", False) or self._follow
@@ -419,7 +518,7 @@ class ChatThread(QTextBrowser):
         if self._typing:
             parts.append(
                 f'<p style="margin:0;">'
-                f'<span style="color:{_C_MUTED}; letter-spacing:2px;">{_DOTS}</span></p>'
+                f'<span style="color:transparent; letter-spacing:2px;">{_DOTS}</span></p>'
             )
 
         parts.append('<p style="margin:0; font-size:4px; color:transparent;">&nbsp;</p>')
