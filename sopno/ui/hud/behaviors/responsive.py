@@ -122,22 +122,24 @@ class ResponsiveMixin:
             self.resize_hint.setVisible(footer == "full")
         self.log_display.setFont(QFont("IBM Plex Mono", m["log_pt"]))
 
-        self.mode_toggle.apply_scale(
-            pad_v=m["mode_pad_v"],
-            pad_h=m["mode_pad_h"],
-            font=m["mode_font"],
-            icon=m["mode_icon"],
-            radius=m["mode_r"],
-        )
-        reason = getattr(self, "reasoning_selector", None)
-        if reason is not None:
-            # Header is tight below ~small: defer to phrase/config overrides.
-            reason.setVisible(self.width() >= 360)
-            reason.apply_scale(
-                pad_v=max(2, m["mode_pad_v"] - 2),
-                pad_h=max(4, m["mode_pad_h"] - 4),
-                font=max(7, m["mode_font"] - 1),
+        mode_toggle = getattr(self, "mode_toggle", None)
+        if mode_toggle is not None:
+            mode_toggle.apply_scale(
+                pad_v=m["mode_pad_v"],
+                pad_h=m["mode_pad_h"],
+                font=m["mode_font"],
+                icon=m["mode_icon"],
                 radius=m["mode_r"],
+            )
+        dropdown = getattr(self, "reason_dropdown", None)
+        if dropdown is not None:
+            # Compact pill (icon + chevron only) below ~360 so the controls
+            # bar still fits with the two HoloToggles.
+            dropdown.apply_scale(
+                pad_v=3,
+                pad_h=8,
+                font=max(7, m["mode_font"] - 1),
+                compact=self.width() < 360,
             )
         self.chat.apply_scale(body_pt=m["body_pt"])
         # §4.3: cap the transcript measure on wide windows (~70ch column).

@@ -167,28 +167,35 @@ allowlists, blocklists, and confirmations as any LLM request.
 
 **Reminder of the real HUD (as built, `sopno/ui/hud/`):** the header row is
 `status_dot` + `context_label` (hint) + small `robot` + `status_label`
-("Idle") + window chrome; the mode control is a **Voice|Text** `HoloToggle`
-(`mic`/`newspaper`) — it is **not** a reasoning selector and must stay that
-way; text mode is hero → `ChatThread` → composer with a footer
-(`context_meter`/log/resize hint).
+("Idle") + window chrome; the reasoning control is a **dropdown pill**
+(`ReasoningModeDropdown`) that lives in the controls bar with the Voice|Text
+`HoloToggle` (`mic`/`newspaper`) and the wake `HoloToggle` (`bell`/`ear`) —
+the toggles are **not** overloaded with a mode label; text mode is hero →
+`ChatThread` → composer with a footer (`context_meter`/log/resize hint).
 
 So the HUD surface is deliberately minimal but has one dedicated control:
 
-- **Approved + implemented:** a dedicated `ReasoningModeSelector`
-  (Auto | Quick | Think | Deep | Plan) sits in the header — there is **no**
-  overloading of the Voice|Text `HoloToggle` ("Qwen3 Quick ⇄ modes" is the
-  rejected earlier-draft label). Selecting a mode calls
+- **Approved + implemented:** a `ReasoningModeDropdown` — a holographic
+  `[ Auto ▾ ]` pill in the same visual family as the `HoloToggle` buttons
+  (same 26px height, glass track, border glow, energy rings) — lives inside
+  the **controls bar** with the other buttons, on the **right** side:
+  `[wake] [voice|text] ﹍ [Auto ▾]`; the dropdown's themed `QMenu` lists
+  Auto | Quick | Think | Deep | Plan. There is **no** overloading of the
+  Voice|Text `HoloToggle` ("Qwen3 Quick ⇄ modes" is the rejected earlier-draft
+  label). The bar travels whole between the voice stage and the text root, so
+  the buttons stay grouped in both modes. Selecting a mode calls
   `assistant.set_reasoning_mode()`; a per-turn phrase override still wins
-  (D2), and the selector live-mirrors the resolved mode via
+  (D2), and the dropdown live-mirrors the resolved mode via
   `reasoning_callback` → `worker.reasoning_changed`. `settings.llm_mode`
-  remains the default when the selector is on **Auto**.
+  remains the default when the dropdown is on **Auto**. Below ~360px the pill
+  collapses to icon+chevron (compact) so it still fits beside the toggles.
 - **Still deferred:** the live thinking trace into the `ChatThread`
   (subtle thinking bubble above the answer — data already arrives via
-  `thinking_callback`). `<360px` windows auto-hide the header selector.
+  `thinking_callback`).
 - **Scope now:** `assistant.py` exposes `thinking_callback` /
   `reasoning_callback` + `set_reasoning_mode()`; `AssistantWorker` bridges
   `reasoning_changed`/`thinking_changed` and `set_reasoning_mode`; the CLI
-  renders the reasoning trace; the HUD wires the approved selector only.
+  renders the reasoning trace; the HUD wires the approved dropdown only.
 
 ---
 

@@ -32,7 +32,7 @@ from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE, motion_enabled
 from sopno.ui.hud.widgets import AliveRobotFace, ChatComposer, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
-from sopno.ui.hud.widgets.reasoning_selector import ReasoningModeSelector
+from sopno.ui.hud.widgets.reasoning_dropdown import ReasoningModeDropdown
 from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.worker import AssistantWorker
 
@@ -186,14 +186,6 @@ class SopnoHUDWindow(
         header.addWidget(self.context_label, 1)
         header.addWidget(self.robot, 0, Qt.AlignVCenter)
         header.addWidget(self.status_label, 1)
-
-        # ── Reasoning-mode selector: dedicated control, never the HoloToggle
-        # (design §5.6). Lives in the header so it stays reachable in both
-        # voice and text pages. ─────────────────────────────────────────────
-        self.reasoning_selector = ReasoningModeSelector()
-        self.reasoning_selector.mode_selected.connect(self._on_reasoning_selected)
-        header.addWidget(self.reasoning_selector, 0, Qt.AlignVCenter)
-
         header.addLayout(chrome)
         root.addLayout(header)
         root.addSpacing(4)
@@ -211,11 +203,13 @@ class SopnoHUDWindow(
         self.voice_orb.setVisible(False)
         voice_layout.addWidget(self.voice_orb, 1)
 
-        # ── Controls row: wake toggle (left) + mode toggle (right) ─────
-        self._controls_row = QHBoxLayout()
+        # ── Controls bar: wake (left) · mode (left) · reasoning ▾ (right).
+        # One widget so it travels whole between the voice stage and the text
+        # root — the buttons always stay grouped. ──────────────────────────
+        self.controls_bar = QWidget()
+        self._controls_row = QHBoxLayout(self.controls_bar)
         self._controls_row.setContentsMargins(0, 0, 0, 0)
         self._controls_row.setSpacing(6)
-        self._controls_row.addStretch(1)
 
         self.wake_toggle = HoloToggle("bell", "ear",
             initial=(getattr(settings, "listening_mode", "wake_word") == "always_on"))
@@ -227,9 +221,14 @@ class SopnoHUDWindow(
         self.mode_toggle.setToolTip("Toggle voice ↔ text mode")
         self.mode_toggle.toggled.connect(self._on_mode_toggle)
         self._controls_row.addWidget(self.mode_toggle, 0, Qt.AlignVCenter)
+
         self._controls_row.addStretch(1)
 
-        voice_layout.addLayout(self._controls_row)
+        self.reason_dropdown = ReasoningModeDropdown()
+        self.reason_dropdown.mode_selected.connect(self._on_reasoning_selected)
+        self._controls_row.addWidget(self.reason_dropdown, 0, Qt.AlignVCenter)
+
+        voice_layout.insertWidget(1, self.controls_bar, 0, Qt.AlignHCenter)
 
         # ── Compact transcript (voice mode) ───────────────────────────────────
         self.voice_transcript = QScrollArea()
@@ -392,24 +391,17 @@ class SopnoHUDWindow(
         self.wake_toggle.blockSignals(False)
 
         root = self._root
+        voice_layout = self.voice_stage.layout()
         if is_text:
-            self._take_from_layout(self._controls_row, self.wake_toggle)
-            if root.indexOf(self.wake_toggle) < 0:
-                self.wake_toggle.setParent(self.central_widget)
+            # Whole controls bar travels to the root, centered above the dock.
+            self._take_from_layout(voice_layout, self.controls_bar)
+            self.controls_bar.setParent(self.central_widget)
+            if root.indexOf(self.controls_bar) < 0:
                 dock_idx = root.indexOf(self.dock)
                 if dock_idx >= 0:
-                    root.insertWidget(dock_idx, self.wake_toggle, 0, Qt.AlignHCenter)
+                    root.insertWidget(dock_idx, self.controls_bar, 0, Qt.AlignHCenter)
                 else:
-                    root.addWidget(self.wake_toggle, 0, Qt.AlignHCenter)
-
-            self._take_from_layout(self._controls_row, self.mode_toggle)
-            if root.indexOf(self.mode_toggle) < 0:
-                self.mode_toggle.setParent(self.central_widget)
-                dock_idx = root.indexOf(self.dock)
-                if dock_idx >= 0:
-                    root.insertWidget(dock_idx, self.mode_toggle, 0, Qt.AlignHCenter)
-                else:
-                    root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
+                    root.addWidget(self.controls_bar, 0, Qt.AlignHCenter)
                 self._insert_mode_gap()
 
             self.voice_stage.setVisible(False)
@@ -424,19 +416,14 @@ class SopnoHUDWindow(
             self._sync_hero_geometry()
             self._start_placeholder_cycle()
         else:
-            self._take_from_layout(root, self.wake_toggle)
-            self.wake_toggle.setParent(self.voice_stage)
-            if self._controls_row.indexOf(self.wake_toggle) < 0:
-                self._controls_row.insertWidget(1, self.wake_toggle, 0, Qt.AlignVCenter)
-
-            self._take_from_layout(root, self.mode_toggle)
+            self._take_from_layout(root, self.controls_bar)
             gap = getattr(self, "_mode_gap", None)
             if gap is not None:
                 root.removeItem(gap)
                 self._mode_gap = None
-            self.mode_toggle.setParent(self.voice_stage)
-            if self._controls_row.indexOf(self.mode_toggle) < 0:
-                self._controls_row.insertWidget(2, self.mode_toggle, 0, Qt.AlignVCenter)
+            self.controls_bar.setParent(self.voice_stage)
+            if voice_layout.indexOf(self.controls_bar) < 0:
+                voice_layout.insertWidget(1, self.controls_bar, 0, Qt.AlignHCenter)
 
             self.voice_stage.setVisible(True)
             self.voice_orb.setVisible(True)
@@ -542,25 +529,25 @@ class SopnoHUDWindow(
         self.set_listening_mode(mode)
 
     def _on_reasoning_selected(self, mode: str) -> None:
-        """HUD selector → assistant. Auto restores the config default."""
+        """HUD dropdown → assistant. Auto restores the config default."""
         self.set_reasoning_mode(mode)
 
     def set_reasoning_mode(self, mode: str) -> None:
         mode = (mode or "").strip().lower()
         if hasattr(self, "worker") and self.worker:
             self.worker.set_reasoning_mode(mode)
-        self._sync_reasoning_selector(mode)
+        self._sync_reasoning_mode(mode)
 
-    def _sync_reasoning_selector(self, mode: str) -> None:
-        """Reflect a resolved/selected mode on the selector without re-emit."""
-        sel = getattr(self, "reasoning_selector", None)
-        if sel is None:
+    def _sync_reasoning_mode(self, mode: str) -> None:
+        """Reflect a resolved/selected mode on the dropdown without re-emit."""
+        dd = getattr(self, "reason_dropdown", None)
+        if dd is None:
             return
-        sel.set_mode(mode)  # no emit — loop guard
+        dd.set_mode(mode)  # no emit — loop guard
 
     def _on_reasoning_resolved(self, mode: str) -> None:
         """Live mirror of the assistant's resolved mode (Auto counts as auto)."""
-        self._sync_reasoning_selector(mode)
+        self._sync_reasoning_mode(mode)
 
     def _add_transcript_line(self, role: str, text: str) -> None:
         """Add a compact line to the voice mode transcript."""
