@@ -129,6 +129,16 @@ class ResponsiveMixin:
             icon=m["mode_icon"],
             radius=m["mode_r"],
         )
+        reason = getattr(self, "reasoning_selector", None)
+        if reason is not None:
+            # Header is tight below ~small: defer to phrase/config overrides.
+            reason.setVisible(self.width() >= 360)
+            reason.apply_scale(
+                pad_v=max(2, m["mode_pad_v"] - 2),
+                pad_h=max(4, m["mode_pad_h"] - 4),
+                font=max(7, m["mode_font"] - 1),
+                radius=m["mode_r"],
+            )
         self.chat.apply_scale(body_pt=m["body_pt"])
         # §4.3: cap the transcript measure on wide windows (~70ch column).
         self.chat.set_column_width(560 if self.width() >= 440 else None)

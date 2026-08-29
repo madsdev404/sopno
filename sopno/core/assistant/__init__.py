@@ -16,6 +16,7 @@ from __future__ import annotations
 import re
 import threading
 import time
+from pathlib import Path
 from typing import Callable, Optional
 
 import speech_recognition as sr
@@ -25,12 +26,17 @@ from sopno.core.context import ConversationContext
 from sopno.core.dispatcher import CommandDispatcher
 from sopno.core.reminders import ReminderPoller, ReminderStore, set_store as set_reminder_store
 from sopno.core.rules import RulePoller, RuleStore, set_store as set_rule_store
-from sopno.llm.client import chat as llm_chat, message_as_dict
+from sopno.llm import modes
+from sopno.llm.client import chat as llm_chat, message_as_dict, single_reply, stream_mode
 from sopno.memory.store import MemoryStore
 from sopno.tools.schema import get_schema, get_schema_for
 from sopno.tools.registry import execute_tool
 from sopno.tools.builtins.dev.terminal import _close as close_terminal_shell
-from sopno.tools.builtins.files.files import pending_action, resolve_pending
+from sopno.tools.builtins.files.files import (
+    _awaiting_confirmation,
+    pending_action,
+    resolve_pending,
+)
 from sopno.voice.listener import Listener
 from sopno.voice.mic import MicStream
 from sopno.voice.stt import transcribe
@@ -90,6 +96,80 @@ _TOOLISH = re.compile(
 _POST_SPEAK_SETTLE_S = 0.45
 
 
+# ── Per-turn reasoning-mode overrides (English + Bangla) ─────────────────────
+# Detection order matters: plan > deep > thinking > quick. Mode words are
+# control words, not conversation — stripped before the LLM sees them (§5.4).
+
+_MODE_PLAN_EN = re.compile(
+    r"\b(?:make\s+a\s+plan|plan\s+this|plan\s+to)\b", re.IGNORECASE
+)
+_MODE_PLAN_BN = re.compile(r"(?<!\w)(?:প্ল্যান\s+করো|পরিকল্পনা\s+করো)(?!\w)")
+_MODE_DEEP_EN = re.compile(r"\b(?:deep\s+think|deep\s+reasoning)\b", re.IGNORECASE)
+_MODE_DEEP_BN = re.compile(r"(?<!\w)গভীর\s+ভাবে\s+ভাবো(?!\w)")
+_MODE_THINKING_EN = re.compile(
+    r"\b(?:think\s+(?:about|first|before))\b", re.IGNORECASE
+)
+_MODE_THINKING_BN = re.compile(r"(?<!\w)(?:ভাবো|ভাবা)(?!\w)")
+_MODE_QUICK_EN = re.compile(
+    r"\b(?:quick\s+answer|short\s+answer|just\s+tell\s+me)\b", re.IGNORECASE
+)
+_MODE_QUICK_BN = re.compile(r"(?<!\w)সংক্ষেপে(?!\w)")
+
+_MODE_CHECKS: list[tuple[re.Pattern, str]] = [
+    (_MODE_PLAN_EN, modes.PLAN),
+    (_MODE_PLAN_BN, modes.PLAN),
+    (_MODE_DEEP_EN, modes.DEEP),
+    (_MODE_DEEP_BN, modes.DEEP),
+    (_MODE_THINKING_EN, modes.THINKING),
+    (_MODE_THINKING_BN, modes.THINKING),
+    (_MODE_QUICK_EN, modes.QUICK),
+    (_MODE_QUICK_BN, modes.QUICK),
+]
+
+
+def detect_mode_override(text: str) -> Optional[str]:
+    """Detect a per-turn reasoning mode from 'think about X'-style phrases."""
+    if not text:
+        return None
+    for pattern, mode in _MODE_CHECKS:
+        if pattern.search(text):
+            return mode
+    return None
+
+
+def strip_mode_phrase(text: str, mode: str) -> str:
+    """Remove the detected control words so they don't reach the LLM (§5.4)."""
+    for pattern, this_mode in _MODE_CHECKS:
+        if this_mode == mode and pattern.search(text):
+            text = pattern.sub(" ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+# ── Plan-mode step parsing (design §5.5) ─────────────────────────────────────
+_PLAN_STEP = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+(.+)$")
+
+
+def plan_steps(text: str) -> list[str]:
+    """Parse numbered (or bulleted) steps from a planner reply."""
+    goals: list[str] = []
+    for line in (text or "").splitlines():
+        m = _PLAN_STEP.match(line)
+        if not m:
+            continue
+        step = m.group(1).strip().rstrip(".")
+        if step and step not in goals:
+            goals.append(step)
+    return goals
+
+
+def _spec_name(spec: dict) -> str:
+    """Map a resolved spec dict back to its concrete mode name."""
+    for name in modes.MODES:
+        if spec is modes.MODES[name]:
+            return name
+    return modes.QUICK
+
+
 class SopnoAssistant:
     """The central brain that coordinates the Speech-to-Text-to-LLM-to-TTS pipeline."""
 
@@ -99,12 +179,27 @@ class SopnoAssistant:
         speech_callback: Optional[Callable[[str], None]] = None,
         reply_callback: Optional[Callable[[str], None]] = None,
         log_callback: Optional[Callable[[str], None]] = None,
+        thinking_callback: Optional[Callable[[str], None]] = None,
+        reasoning_callback: Optional[Callable[[str], None]] = None,
     ):
         # Callback bindings for UI state synchronization
         self.on_status_changed  = status_callback or (lambda s: None)
         self.on_speech_detected = speech_callback or (lambda t: None)
         self.on_reply_generated = reply_callback or (lambda r: None)
         self.on_log_message     = log_callback or (lambda m: print(f"[Log] {m}"))
+
+        # Reasoning-mode render (thinking trace + the active mode label).
+        # Defaults to no-ops — the HUD wires these in a later, approved phase.
+        self.on_thinking        = thinking_callback or (lambda t: None)
+        self.on_reasoning_mode  = reasoning_callback or (lambda m: None)
+
+        self._turn_mode = modes.QUICK
+        self._turn_think = False
+        self._streamed_thinking = ""
+        # UI-forced reasoning mode (HUD selector) — None = follow config.
+        # Wins over settings.llm_mode but still loses to per-turn phrase
+        # overrides ("think about …", "make a plan …"), see D2.
+        self._forced_mode: Optional[str] = None
 
         self.running = True
         self.context = ConversationContext()
@@ -223,6 +318,17 @@ class SopnoAssistant:
             return
         self.listening_mode = mode
         self._text_event.set()  # unblock wake word wait if active
+
+    def set_reasoning_mode(self, mode: str) -> None:
+        """Force a reasoning mode from the UI (HUD selector) until changed.
+
+        Accepts the concrete modes plus "auto". `auto` restores the
+        config-driven default. Phrase overrides still win per turn (§3.1).
+        """
+        mode = modes.normalize(mode) or modes.AUTO
+        self._forced_mode = None if mode == modes.AUTO else mode
+        self.on_reasoning_mode(mode)
+        self.on_log_message(f"Reasoning mode (HUD) → {mode}")
 
     def submit_text(self, text: str) -> None:
         """Queue a typed message (text mode)."""
@@ -539,12 +645,237 @@ class SopnoAssistant:
         self.on_status_changed("standby")
         return True
 
+    def _streamed_reply(self, messages: list[dict], mode: str) -> str:
+        """Text-mode streaming: live thinking trace, then the buffered answer."""
+        self._streamed_thinking = ""
+        thinking_buf: list[str] = []
+        answer_buf: list[str] = []
+        try:
+            for tag, chunk in stream_mode(messages, mode=mode):
+                if tag == "thinking" and chunk:
+                    thinking_buf.append(chunk)
+                    self._streamed_thinking = "".join(thinking_buf)
+                    self.on_thinking(self._streamed_thinking)
+                elif tag == "answer" and chunk:
+                    answer_buf.append(chunk)
+        except Exception as e:
+            self.on_log_message(f"Ollama/stream error: {e}")
+        return "".join(answer_buf)
+
+    # ── Plan mode (design §5.5): PLAN_ENTRY → PLANNING → ARTIFACT → GATE → EXECUTE ──
+    def _handle_plan_command(self, goal: str) -> bool:
+        """User-approved plan-then-execute flow for multi-step goals."""
+        self.on_log_message(f"[Plan] planning: '{goal}'")
+        self.on_status_changed("thinking")
+
+        plan_text = self._plan_request(goal)
+        steps = plan_steps(plan_text)
+        if not steps:
+            steps = [goal]
+
+        artifact = self._write_plan_artifact(goal, steps)
+        self.on_log_message(f"[Plan] artifact → {artifact}")
+        self._render_plan(goal, steps, artifact)
+
+        if getattr(settings, "plan_confirm", True):
+            # GATE: reuse the pending-action Yes/No machinery (resolved next turn)
+            _awaiting_confirmation(
+                f"execute this {len(steps)}-step plan",
+                lambda: self._plan_execute(goal, steps),
+            )
+            is_bn = bool(re.search(r"[\u0980-\u09FF]", goal))
+            question = (
+                f"Should I go ahead with this {len(steps)}-step plan?"
+                if not is_bn
+                else f"আমি কি এই {len(steps)} ধাপের পরিকল্পনা অনুযায়ী এগিয়ে যাব?"
+            )
+            self._speak_short(question)
+        else:
+            # plan_confirm=false → auto-skip the gate (design §5.5)
+            summary = self._plan_execute(goal, steps)
+            self._deliver_reply(summary)
+        return True
+
+    def _plan_request(self, goal: str) -> str:
+        """Non-streaming planner call — cheap on CPU (design §5.5)."""
+        messages = [
+            {"role": "system", "content": self._planner_prompt()},
+            {"role": "user", "content": goal},
+        ]
+        try:
+            return single_reply(messages, mode=modes.PLAN)
+        except Exception as e:
+            self.on_log_message(f"[Plan] planner failed: {e}")
+            return "1. " + goal
+
+    def _planner_prompt(self) -> str:
+        path = settings.prompts_dir / "planner.txt"
+        try:
+            return path.read_text(encoding="utf-8").strip()
+        except OSError:
+            return (
+                "Break the user's goal into at most 5 numbered steps. "
+                "Each step must be independently executable and end with "
+                "the final deliverable. Return only the numbered list."
+            )
+
+    def _write_plan_artifact(self, goal: str, steps: list[str]) -> str:
+        """Persist the reviewable plan to plans/<slug>-<ts>.md (gitignored)."""
+        directory = getattr(settings, "plan_dir", None)
+        directory = Path(directory) if directory else Path("plans")
+        directory.mkdir(parents=True, exist_ok=True)
+        slug = re.sub(r"[^a-z0-9]+", "-", goal.lower()).strip("-")[:40] or "plan"
+        ts = time.strftime("%Y%m%d-%H%M%S")
+        path = directory / f"{slug}-{ts}.md"
+        lines = [f"# Plan — {goal}", "", f"- Created: {ts}", f"- Steps: {len(steps)}", "", "## Steps", ""]
+        lines += [f"{i}. {s}" for i, s in enumerate(steps, 1)]
+        path.write_text("\n".join(lines).strip() + "\n", encoding="utf-8")
+        return str(path)
+
+    def _render_plan(self, goal: str, steps: list[str], artifact: str) -> None:
+        """Render the full numbered list; speak only a short summary (§5.5)."""
+        is_bn = bool(re.search(r"[\u0980-\u09FF]", goal))
+        block = "\n".join(
+            ["# Plan", "", goal, ""]
+            + [f"{i}. {s}" for i, s in enumerate(steps, 1)]
+            + ["", artifact]
+        )
+        self.on_reply_generated(block)
+        short = (
+            f"I put together a {len(steps)}-step plan."
+            if not is_bn
+            else f"আমি {len(steps)} ধাপের একটি পরিকল্পনা তৈরি করেছি।"
+        )
+        self._speak_short(short)
+
+    def _speak_short(self, text: str) -> None:
+        """Speak a short line without re-rendering (plan summary / gate prompt)."""
+        with self._speech_lock:
+            if self.interaction_mode == "voice":
+                self.on_status_changed("speaking")
+                self._speak_with_barge_in(text)
+                time.sleep(_POST_SPEAK_SETTLE_S)
+            else:
+                self.on_status_changed("speaking")
+                time.sleep(0.2)
+
+    def _plan_execute(self, goal: str, steps: list[str]) -> str:
+        """EXECUTE loop — walks approved steps through the normal gates."""
+        base = self.context.get_messages_for_llm()
+        remaining = list(steps)
+        replanned: set[str] = set()
+        i = 0
+        done = 0
+
+        while i < len(remaining):
+            step = remaining[i]
+            self.on_log_message(f"[Plan][{i + 1}/{len(remaining)}] {step}")
+            self.on_status_changed("thinking")
+
+            output = self._execute_plan_step(base, goal, step)
+
+            if self._plan_looks_error(output) and step not in replanned:
+                replanned.add(step)
+                revised = self._plan_replan(goal, step, output, remaining[i:])
+                if revised:
+                    self.on_log_message(f"[Plan] replanning after step {i + 1} failed.")
+                    remaining = remaining[:i] + revised
+                    continue
+
+            done += 1
+            self._deliver_step_result(output)
+            i += 1
+
+        is_bn = bool(re.search(r"[\u0980-\u09FF]", goal))
+        self.on_log_message("[Plan] complete.")
+        return (
+            f"Plan complete — {done} of {len(steps)} step(s) done."
+            if not is_bn
+            else f"পরিকল্পনা সম্পন্ন — {len(steps)} ধাপের মধ্যে {done} ধাপ শেষ হয়েছে।"
+        )
+
+    def _execute_plan_step(self, base: list[dict], goal: str, step: str) -> str:
+        """One executor iteration — llm_chat(tools) → execute_tool (gates intact)."""
+        messages = base + [
+            {"role": "user", "content": f"Goal: {goal}\nExecute this step: {step}"}
+        ]
+        try:
+            response = llm_chat(messages, tools=get_schema_for(step), mode=modes.QUICK)
+        except Exception as e:
+            return f"Error: {e}"
+
+        response_msg = message_as_dict(response["message"])
+        tool_calls = response_msg.get("tool_calls") or []
+        if not tool_calls:
+            return (response_msg.get("content") or "").strip()
+
+        messages.append(response_msg)
+        for tool in tool_calls:
+            fn = tool["function"] if isinstance(tool, dict) else tool.function
+            name = fn["name"] if isinstance(fn, dict) else fn.name
+            args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+            if not isinstance(args, dict):
+                args = {}
+            self.on_log_message(f"[Plan][tool] '{name}' with args {args}")
+            tool_result = execute_tool(name, args) or "Done."
+            self.on_log_message(f"[Plan][tool] → {tool_result}")
+            messages.append({"role": "tool", "content": tool_result})
+
+        try:
+            final = llm_chat(messages, mode=modes.QUICK)
+        except Exception as e:
+            return f"Error: {e}"
+        return (message_as_dict(final["message"]).get("content") or "").strip()
+
+    def _plan_replan(self, goal: str, failed_step: str, error: str, remaining: list[str]) -> list[str]:
+        """Re-run the planner on the remaining steps (bounded per step, §5.5)."""
+        prompt = (
+            "A step of the plan failed.\n"
+            f"Failed step: {failed_step}\n"
+            f"Error: {error[:400]}\n"
+            "Remaining steps to revise:\n"
+            + "\n".join(f"{i}. {s}" for i, s in enumerate(remaining, 1))
+            + "\nReturn ONLY a revised numbered list of the remaining steps."
+        )
+        try:
+            text = single_reply(
+                [
+                    {"role": "system", "content": self._planner_prompt()},
+                    {"role": "user", "content": prompt},
+                ],
+                mode=modes.PLAN,
+            )
+        except Exception as e:
+            self.on_log_message(f"[Plan] replan failed: {e}")
+            return []
+        return plan_steps(text)
+
+    @staticmethod
+    def _plan_looks_error(text: str) -> bool:
+        head = (text or "").strip().lower()[:80]
+        return bool(
+            re.match(
+                r"^(error|failed|failure|exception|unable|permission denied|"
+                r"off-limits|sorry|no such)",
+                head,
+            )
+        )
+
+    def _deliver_step_result(self, output: str) -> None:
+        """Speak each completed step's output as it finishes (§5.5)."""
+        out = (output or "").strip()
+        if not out:
+            return
+        short = out if len(out) <= 160 else out[:157] + "…"
+        self._deliver_reply(short)
+
     def _process_command(self, cmd_text: str) -> bool:
         """
         Run dispatcher / LLM for one command.
         Returns False if the assistant should exit.
         """
         self.on_status_changed("thinking")
+        self.on_thinking("")  # clear any previous turn's reasoning bubble
         clean_cmd = cmd_text.lower().strip().replace(".", "").replace("?", "").replace("!", "")
 
         # A. Exit checks
@@ -611,6 +942,37 @@ class SopnoAssistant:
             self.context.add_assistant_message(memory_reply)
             return True
 
+        # D2. Reasoning mode for this turn — phrase override >> HUD force >>
+        # config default >> auto (§3.1)
+        override = detect_mode_override(cmd_text)
+        if override:
+            self.on_log_message(f"Mode override → {override}")
+            cmd_text = strip_mode_phrase(cmd_text, override) or cmd_text
+            turn_mode = override
+        else:
+            turn_mode = self._forced_mode or (
+                modes.normalize(getattr(settings, "llm_mode", "auto")) or modes.AUTO
+            )
+
+        # D3. Plan mode — plan-then-execute branch (between D and E, §5.4/5.5)
+        if turn_mode == modes.PLAN:
+            return self._handle_plan_command(cmd_text)
+
+        # §5.2 backward-compat: auto's non-deep default tier honors the legacy
+        # llm_think toggle (llm_mode supersedes it when present).
+        self._turn_mode = _spec_name(modes.resolve(turn_mode, cmd_text))
+        if (
+            self._turn_mode == modes.THINKING
+            and not bool(getattr(settings, "llm_think", False))
+            and modes.normalize(turn_mode) in (None, modes.AUTO)
+        ):
+            self._turn_mode = modes.QUICK
+        self._turn_think = bool(modes.spec(self._turn_mode)["think"])
+        self.on_log_message(f"Reasoning mode → {self._turn_mode}")
+        self.on_reasoning_mode(self._turn_mode)
+        if self._turn_think:
+            self.on_status_changed("thinking")
+
         # E. Rule-based Dispatcher (Fast path)
         self.on_log_message("Checking local system rules dispatcher…")
         tool_output = self.dispatcher.dispatch(cmd_text)
@@ -626,7 +988,7 @@ class SopnoAssistant:
         if use_tools:
             self.on_log_message("Querying Ollama with tools…")
         else:
-            self.on_log_message("Querying Ollama (fast chat, no tools)…")
+            self.on_log_message(f"Querying Ollama ({self._turn_mode}, no tools)…")
 
         if self._stopped_mid_turn():
             return True
@@ -635,42 +997,50 @@ class SopnoAssistant:
         chat_messages = self.context.get_messages_for_llm()
 
         try:
-            response = llm_chat(
-                chat_messages,
-                tools=get_schema_for(cmd_text) if use_tools else None,
-            )
-
-            response_msg = message_as_dict(response["message"])
-            tool_calls = response_msg.get("tool_calls") or []
-
-            if tool_calls:
-                chat_messages.append(response_msg)
-
-                for tool in tool_calls:
-                    if self._stopped_mid_turn():
-                        return True
-                    # Ollama may return dicts or objects
-                    fn = tool["function"] if isinstance(tool, dict) else tool.function
-                    name = fn["name"] if isinstance(fn, dict) else fn.name
-                    args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
-                    if not isinstance(args, dict):
-                        args = {}
-                    self.on_log_message(f"LLM request tool: '{name}' with args {args}")
-
-                    tool_result = execute_tool(name, args)
-                    self.on_log_message(f"Tool output: '{tool_result}'")
-
-                    chat_messages.append({
-                        "role": "tool",
-                        "content": tool_result,
-                    })
-
-                self.on_log_message("Requesting conversational response from Ollama…")
-                final_response = llm_chat(chat_messages)
-                final_msg = message_as_dict(final_response["message"])
-                assistant_reply = final_msg.get("content", "")
+            if not use_tools and self.interaction_mode == "text":
+                # Text mode streams the reasoning trace live (design §5.3/5.6)
+                assistant_reply = self._streamed_reply(chat_messages, self._turn_mode)
+                thinking_trace = getattr(self, "_streamed_thinking", "")
             else:
-                assistant_reply = response_msg.get("content", "")
+                response = llm_chat(
+                    chat_messages,
+                    tools=get_schema_for(cmd_text) if use_tools else None,
+                    mode=self._turn_mode,
+                )
+
+                response_msg = message_as_dict(response["message"])
+                tool_calls = response_msg.get("tool_calls") or []
+                thinking_trace = response_msg.get("thinking") or ""
+
+                if tool_calls:
+                    chat_messages.append(response_msg)
+
+                    for tool in tool_calls:
+                        if self._stopped_mid_turn():
+                            return True
+                        # Ollama may return dicts or objects
+                        fn = tool["function"] if isinstance(tool, dict) else tool.function
+                        name = fn["name"] if isinstance(fn, dict) else fn.name
+                        args = fn["arguments"] if isinstance(fn, dict) else fn.arguments
+                        if not isinstance(args, dict):
+                            args = {}
+                        self.on_log_message(f"LLM request tool: '{name}' with args {args}")
+
+                        tool_result = execute_tool(name, args)
+                        self.on_log_message(f"Tool output: '{tool_result}'")
+
+                        chat_messages.append({
+                            "role": "tool",
+                            "content": tool_result,
+                        })
+
+                    self.on_log_message("Requesting conversational response from Ollama…")
+                    final_response = llm_chat(chat_messages, mode=self._turn_mode)
+                    final_msg = message_as_dict(final_response["message"])
+                    assistant_reply = final_msg.get("content", "")
+                    thinking_trace = thinking_trace or final_msg.get("thinking") or ""
+                else:
+                    assistant_reply = response_msg.get("content", "")
 
             if self._stopped_mid_turn():
                 return True
@@ -680,6 +1050,10 @@ class SopnoAssistant:
 
             if not assistant_reply_clean:
                 assistant_reply_clean = "Sorry, I didn't catch that. Could you say it again?"
+
+            # Render the reasoning trace (voice: show before TTS starts)
+            if thinking_trace:
+                self.on_thinking(thinking_trace)
 
             self._deliver_reply(assistant_reply_clean)
             self.context.add_assistant_message(assistant_reply_clean)

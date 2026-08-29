@@ -26,6 +26,7 @@ All project docs live here, organized to mirror the codebase layout.
 | [features.md](roadmap/features.md) | Complete feature vision and capability reference |
 | [status.md](roadmap/status.md) | Incremental progress tracker |
 | [implementation-plan.md](roadmap/implementation-plan.md) | Step-by-step implementation plan |
+| [thinking-modes.md](roadmap/thinking-modes.md) | Reasoning modes (quick/thinking/deep/plan) — design, auto-detection, planner flow |
 | [long-running-agents.md](roadmap/long-running-agents.md) | Background agent system design |
 | [autonomous-coding.md](roadmap/autonomous-coding.md) | Autonomous coding agent design |
 | [MATURITY.md](roadmap/MATURITY.md) | **Maturity roadmap** — how to make Sopno as polished as Cursor/AntiGravity |

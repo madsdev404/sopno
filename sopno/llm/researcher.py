@@ -172,6 +172,14 @@ def _summarize(question: str, passages: list[dict]) -> str:
     )
     user = f"Question: {question}\n\nPassages:\n\n" + "\n\n".join(numbered)
 
+    # Deep research inherits the active reasoning mode's thinking budget
+    # (doc/roadmap/thinking-modes.md §5.3).
+    from sopno.llm import modes
+    resolved = modes.resolve(
+        getattr(settings, "llm_mode", "auto"),
+        question,
+    )
+
     try:
         resp = requests.post(
             _CHAT_URL,
@@ -182,10 +190,10 @@ def _summarize(question: str, passages: list[dict]) -> str:
                     {"role": "user", "content": user},
                 ],
                 "stream": False,
-                "think": bool(settings.llm_think),
+                "think": bool(resolved["think"]),
                 "options": {
-                    "num_ctx": settings.research_summary_ctx,
-                    "num_predict": settings.research_summary_tokens,
+                    "num_ctx": max(settings.research_summary_ctx, resolved["num_ctx"]),
+                    "num_predict": max(settings.research_summary_tokens, resolved["num_predict"]),
                     "temperature": 0.3,
                 },
             },

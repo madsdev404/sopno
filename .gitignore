@@ -145,3 +145,6 @@ sopno/memory/agents.db-shm
 
 # Autonomous-coding worktrees (isolated branches awaiting review — never commit)
 sopno/memory/worktrees/
+
+# Plan-mode artifacts (user data — never commit)
+plans/

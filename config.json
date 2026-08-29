@@ -1,6 +1,10 @@
 {
   "model_name": "qwen3:8b",
   "llm_think": false,
+  "llm_mode": "auto",
+  "llm_think_num_predict": 300,
+  "llm_deep_num_predict": 800,
+  "llm_deep_num_ctx": 8192,
   "llm_num_predict": 120,
   "llm_num_ctx": 4096,
   "llm_temperature": 0.6,
@@ -144,5 +148,7 @@
   "readers_max_pages": 20,
   "readers_max_chars": 20000,
   "git_enabled": true,
-  "git_max_diff_chars": 12000
+  "git_max_diff_chars": 12000,
+  "plan_dir": "plans",
+  "plan_confirm": true
 }

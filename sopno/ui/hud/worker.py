@@ -14,6 +14,8 @@ class AssistantWorker(QObject):
     speech_detected = pyqtSignal(str)
     reply_generated = pyqtSignal(str)
     log_message     = pyqtSignal(str)
+    reasoning_changed = pyqtSignal(str)
+    thinking_changed  = pyqtSignal(str)
 
     def __init__(self) -> None:
         super().__init__()
@@ -22,6 +24,8 @@ class AssistantWorker(QObject):
             speech_callback=lambda text: self.speech_detected.emit(text),
             reply_callback=lambda reply: self.reply_generated.emit(reply),
             log_callback=lambda msg: self.log_message.emit(msg),
+            thinking_callback=lambda trace: self.thinking_changed.emit(trace),
+            reasoning_callback=lambda mode: self.reasoning_changed.emit(mode),
         )
 
     @property
@@ -43,6 +47,10 @@ class AssistantWorker(QObject):
 
     def set_listening_mode(self, mode: str) -> None:
         self.assistant.set_listening_mode(mode)
+
+    def set_reasoning_mode(self, mode: str) -> None:
+        """Force a reasoning mode (quick/thinking/deep/plan/auto)."""
+        self.assistant.set_reasoning_mode(mode)
 
     def submit_text(self, text: str) -> None:
         self.assistant.submit_text(text)

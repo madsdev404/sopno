@@ -32,6 +32,7 @@ from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE, motion_enabled
 from sopno.ui.hud.widgets import AliveRobotFace, ChatComposer, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
+from sopno.ui.hud.widgets.reasoning_selector import ReasoningModeSelector
 from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.worker import AssistantWorker
 
@@ -71,6 +72,7 @@ class SopnoHUDWindow(
         self.worker.speech_detected.connect(self.update_user_speech)
         self.worker.reply_generated.connect(self.update_sopno_reply)
         self.worker.log_message.connect(self.update_log)
+        self.worker.reasoning_changed.connect(self._on_reasoning_resolved)
         self.worker.log_message.connect(
             lambda msg: self.dashboard.append_log(msg) if self.dashboard else None
         )
@@ -184,6 +186,14 @@ class SopnoHUDWindow(
         header.addWidget(self.context_label, 1)
         header.addWidget(self.robot, 0, Qt.AlignVCenter)
         header.addWidget(self.status_label, 1)
+
+        # ── Reasoning-mode selector: dedicated control, never the HoloToggle
+        # (design §5.6). Lives in the header so it stays reachable in both
+        # voice and text pages. ─────────────────────────────────────────────
+        self.reasoning_selector = ReasoningModeSelector()
+        self.reasoning_selector.mode_selected.connect(self._on_reasoning_selected)
+        header.addWidget(self.reasoning_selector, 0, Qt.AlignVCenter)
+
         header.addLayout(chrome)
         root.addLayout(header)
         root.addSpacing(4)
@@ -530,6 +540,27 @@ class SopnoHUDWindow(
     def _on_wake_toggle(self, checked: bool) -> None:
         mode = "always_on" if checked else "wake_word"
         self.set_listening_mode(mode)
+
+    def _on_reasoning_selected(self, mode: str) -> None:
+        """HUD selector → assistant. Auto restores the config default."""
+        self.set_reasoning_mode(mode)
+
+    def set_reasoning_mode(self, mode: str) -> None:
+        mode = (mode or "").strip().lower()
+        if hasattr(self, "worker") and self.worker:
+            self.worker.set_reasoning_mode(mode)
+        self._sync_reasoning_selector(mode)
+
+    def _sync_reasoning_selector(self, mode: str) -> None:
+        """Reflect a resolved/selected mode on the selector without re-emit."""
+        sel = getattr(self, "reasoning_selector", None)
+        if sel is None:
+            return
+        sel.set_mode(mode)  # no emit — loop guard
+
+    def _on_reasoning_resolved(self, mode: str) -> None:
+        """Live mirror of the assistant's resolved mode (Auto counts as auto)."""
+        self._sync_reasoning_selector(mode)
 
     def _add_transcript_line(self, role: str, text: str) -> None:
         """Add a compact line to the voice mode transcript."""

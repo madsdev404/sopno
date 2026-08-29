@@ -814,6 +814,12 @@ Commit changes."
 
 Run tests."
 
+> **Reasoning modes (quick / thinking / deep / plan).** Implemented.
+> See [thinking-modes.md](./thinking-modes.md) for the full design — per-mode
+> Ollama budgets, `auto` phrase routing, the stripped control words, the
+> plan-then-execute flow with the confirmation gate, and the deferred HUD
+> surface (thinking trace + mode label callbacks wired, render pending).
+
 ---
 
 # 41. Future Features
@@ -826,8 +832,6 @@ Long-running background agents
 > [long-running-agents.md](./long-running-agents.md) for the research-backed,
 > implemented designs (loop anatomy, verification ladder, durable session/queue
 > architecture, safety, rollout, and status).
-
-Research agent
 
 News agent
 

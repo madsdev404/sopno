@@ -30,6 +30,13 @@ class Settings:
         self.model_name: str        = data.get("model_name", "qwen3:8b")
         # Qwen3 "thinking" burns 30–90s on CPU for short voice replies — keep off
         self.llm_think: bool        = bool(data.get("llm_think", False))
+        # Reasoning mode: "quick" | "thinking" | "deep" | "plan" | "auto"
+        # (doc/roadmap/thinking-modes.md — supersedes llm_think when set)
+        self.llm_mode: str          = data.get("llm_mode", "auto")
+        # Per-mode budget overrides (defaults match MODES in llm/modes.py)
+        self.llm_think_num_predict: int = int(data.get("llm_think_num_predict", 300))
+        self.llm_deep_num_predict:  int = int(data.get("llm_deep_num_predict", 800))
+        self.llm_deep_num_ctx:      int = int(data.get("llm_deep_num_ctx", 8192))
         self.llm_num_predict: int   = int(data.get("llm_num_predict", 120))
         self.llm_num_ctx: int       = int(data.get("llm_num_ctx", 2048))
         self.llm_temperature: float = float(data.get("llm_temperature", 0.6))
@@ -378,6 +385,14 @@ class Settings:
         self.prompts_dir: Path      = _PROJECT_ROOT / "prompts"
         self.models_dir: Path       = _PROJECT_ROOT / "models"
         self.logs_dir: Path         = _PROJECT_ROOT / "logs"
+
+        # ── Plan mode (doc/roadmap/thinking-modes.md §5.2) ─────
+        # Plan artifacts land here (relative → project root, like memory paths).
+        self.plan_dir: Path = Path(data.get("plan_dir", "plans"))
+        if not self.plan_dir.is_absolute():
+            self.plan_dir = _PROJECT_ROOT / self.plan_dir
+        # Require an explicit Yes/No before executing a plan.
+        self.plan_confirm: bool     = bool(data.get("plan_confirm", True))
 
     def __repr__(self) -> str:
         return f"<Settings model={self.model_name} wake_words={self.wake_words}>"
