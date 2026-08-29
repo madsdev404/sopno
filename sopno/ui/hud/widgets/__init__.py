@@ -6,6 +6,7 @@ thread, and the holographic toggle switch.
 """
 
 from sopno.ui.hud.widgets.chat import ChatThread
+from sopno.ui.hud.widgets.composer import ChatComposer
 from sopno.ui.hud.widgets.context_meter import ContextMeter
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
 from sopno.ui.hud.widgets.robot import AliveRobotFace
@@ -14,6 +15,7 @@ from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.widgets.voice_orb import VoiceModeOrb
 
 __all__ = [
+    "ChatComposer",
     "ChatThread",
     "ContextMeter",
     "HoloToggle",

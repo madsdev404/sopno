@@ -133,13 +133,13 @@ class ResponsiveMixin:
         # §4.3: cap the transcript measure on wide windows (~70ch column).
         self.chat.set_column_width(560 if self.width() >= 440 else None)
 
-        kind = self.send_btn.property("icon_kind") or "send"
-        self.send_btn.setFixedSize(m["send"], m["send"])
-        self.send_btn.setIconSize(QSize(m["send_icon"], m["send_icon"]))
-        self.send_btn.setIcon(_paint_icon(kind, m["send"], active=False))
-        self.text_input.setFont(QFont("IBM Plex Sans", m["body_pt"]))
-        self._auto_resize_input()          # min height follows the font size
-        self._style_dock()                 # radius/border from current metrics
+        if hasattr(self, "composer"):
+            self.composer.apply_scale(
+                body_pt=m["body_pt"],
+                send=m["send"],
+                send_icon=m["send_icon"],
+                mode_r=m["mode_r"],
+            )
 
         self._apply_mode_layout()
 

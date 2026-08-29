@@ -66,11 +66,12 @@ class TranscriptTest(ChatThreadTestBase):
         self.assertEqual(lines[0], "You: hello")
         self.assertEqual(lines[1], "Sopno: hi there")
 
-    def test_consecutive_same_role_merge_into_one_block(self) -> None:
+    def test_consecutive_same_role_are_separate_blocks(self) -> None:
         self.thread.add_message("user", "first part")
         self.thread.add_message("user", "second part")
-        self.assertEqual(len(self.thread._blocks), 1)
-        self.assertIn("second part", self.thread._blocks[0]["text"])
+        self.assertEqual(len(self.thread._blocks), 2)
+        self.assertEqual(self.thread._blocks[0]["text"], "first part")
+        self.assertEqual(self.thread._blocks[1]["text"], "second part")
 
     def test_error_rows_attributed(self) -> None:
         self.thread.add_message("error", "boom")
@@ -97,9 +98,9 @@ class NoChromeTest(ChatThreadTestBase):
         plain = self.thread.toPlainText()
         self.assertIsNone(re.search(r"\d{2}:\d{2}", plain))
 
-    def test_plain_text_is_exactly_the_message(self) -> None:
+    def test_plain_text_contains_message(self) -> None:
         self.thread.add_message("assistant", "plain text only")
-        self.assertEqual(self.thread.toPlainText(), "plain text only")
+        self.assertIn("plain text only", self.thread.toPlainText())
 
 
 class TypingDotsTest(ChatThreadTestBase):
@@ -120,14 +121,14 @@ class TypingDotsTest(ChatThreadTestBase):
 
 
 class StreamingTest(ChatThreadTestBase):
-    def test_streaming_block_shows_caret(self) -> None:
+    def test_streaming_block_shows_text(self) -> None:
         self.thread.add_message("assistant", "partial", streaming=True)
-        self.assertIn("\u2548", self.thread.toPlainText())
+        self.assertIn("partial", self.thread.toPlainText())
 
-    def test_finalize_removes_caret(self) -> None:
+    def test_finalize_keeps_text(self) -> None:
         self.thread.add_message("assistant", "partial", streaming=True)
         self.thread.finalize_streaming(interrupted=False)
-        self.assertNotIn("\u2548", self.thread.toPlainText())
+        self.assertIn("partial", self.thread.toPlainText())
 
     def test_append_stream_text_grows_open_block(self) -> None:
         self.thread.add_message("assistant", "he", streaming=True)

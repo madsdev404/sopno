@@ -49,7 +49,7 @@ class ChromeMixin:
         ))
         return btn
 
-    def send_text_message(self) -> None:
+    def send_text_message(self, text: str | None = None) -> None:
         """Submit the composer draft (Enter / Send).
 
         Locked while generating — never two interleaved answers (S10). The
@@ -57,15 +57,17 @@ class ChromeMixin:
         """
         if getattr(self, "_generating", False):
             return
-        text = self.text_input.toPlainText().strip()
-        if not text:
+        cleaned = (text if text is not None else self.text_input.toPlainText()).strip()
+        if not cleaned:
             return
-        self.text_input.clear()
-        self._auto_resize_input()          # back to single-line min height
-        self.chat.add_message("user", text)
+        if text is None:
+            self.text_input.clear()
+            if hasattr(self, "composer"):
+                self.composer.refresh_height()
+        self.chat.add_message("user", cleaned)
         self._sync_hero()
         if hasattr(self, "worker") and self.worker:
-            self.worker.submit_text(text)
+            self.worker.submit_text(cleaned)
 
     def stop_generation(self) -> None:
         """Stop button / Esc while generating — halts the in-flight turn."""
@@ -73,34 +75,15 @@ class ChromeMixin:
             self.worker.stop_generation()
 
     def _set_generating(self, busy: bool) -> None:
-        """Send ⇄ Stop morph: icon swap + border shift to error accent (§5.8)."""
+        """Send ⇄ Stop morph on the composer."""
         busy = bool(busy)
         if getattr(self, "_generating", False) == busy:
             return
         self._generating = busy
-        btn = self.send_btn
-        kind = "square" if busy else "send"
-        btn.setProperty("icon_kind", kind)
-        m = getattr(self, "_metrics", None) or {}
-        size = m.get("send", 32)
-        icon = m.get("send_icon", 16)
-        btn.setIcon(_paint_icon(kind, size, active=False))
-        btn.setToolTip("Stop generating" if busy else "Send message")
-        if busy:
-            bg, border = "rgba(240, 113, 120, 0.10)", "rgba(240, 113, 120, 0.50)"
-            hbg, hb = "rgba(240, 113, 120, 0.18)", "rgba(240, 113, 120, 0.65)"
-            pbg = "rgba(240, 113, 120, 0.28)"
-        else:
-            bg, border = "rgba(255, 255, 255, 0.04)", "rgba(255, 255, 255, 0.08)"
-            hbg, hb = "rgba(255, 255, 255, 0.08)", "rgba(255, 255, 255, 0.14)"
-            pbg = "rgba(255, 255, 255, 0.12)"
-        btn.setStyleSheet(_ICON_BTN.format(
-            bg=bg, border=border, hover_bg=hbg, hover_border=hb, pressed_bg=pbg,
-        ))
-        btn.setIconSize(QSize(icon, icon))
-        self._sync_composer_enabled()
+        if hasattr(self, "composer"):
+            self.composer.set_generating(busy)
 
     def _sync_composer_enabled(self) -> None:
-        """Send enabled iff there is text AND no generation is running."""
-        has_text = bool(self.text_input.toPlainText().strip())
-        self.send_btn.setEnabled(has_text and not getattr(self, "_generating", False))
+        """Composer manages its own send-button state."""
+        if hasattr(self, "composer"):
+            self.composer._sync_send_state()

@@ -8,8 +8,8 @@ from __future__ import annotations
 
 import threading
 
-from PyQt5.QtCore import QSize, Qt, QEvent, QRect, QTimer
-from PyQt5.QtGui import QColor, QFont, QFontMetrics, QKeyEvent, QKeySequence
+from PyQt5.QtCore import QSize, Qt, QTimer
+from PyQt5.QtGui import QColor, QFont, QKeySequence
 from PyQt5.QtWidgets import (
     QApplication,
     QFrame,
@@ -18,7 +18,6 @@ from PyQt5.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QMainWindow,
-    QPlainTextEdit,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -31,7 +30,7 @@ from sopno.ui.hud.behaviors import ChromeMixin, ResponsiveMixin, ResizeMixin, St
 from sopno.ui.hud.dashboard import DashboardPanel
 from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE, motion_enabled
-from sopno.ui.hud.widgets import AliveRobotFace, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
+from sopno.ui.hud.widgets import AliveRobotFace, ChatComposer, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
 from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.worker import AssistantWorker
@@ -299,60 +298,13 @@ class SopnoHUDWindow(
             self._dash_backdrop.hide()
 
         # ── Composer (text mode only) ─────────────────────────────────────────
-        # ChatGPT-style anatomy (research §composer): the textarea and the
-        # send/stop button are ONE rounded container; the button anchors to
-        # the bottom-right so it rides down as the field grows, and the whole
-        # dock lights up with a focus ring. Heights derive from font metrics,
-        # never magic pixels.
-        self._dock_focused = False
-        self.dock = QFrame()
-        self.dock.setObjectName("Dock")
-        self.dock.setProperty("focused", False)
-        dock_row = QHBoxLayout(self.dock)
-        dock_row.setContentsMargins(12, 7, 8, 7)
-        dock_row.setSpacing(8)
-
-        self.text_input = QPlainTextEdit()
-        self.text_input.setPlaceholderText("Type a message…")
-        self.text_input.setToolTip("Type a message and press Enter to send\nShift+Enter for a new line")
-        self.text_input.setFont(QFont("IBM Plex Sans", 10))
-        self.text_input.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        self.text_input.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
-        self.text_input.setTabChangesFocus(True)
-        self.text_input.document().setDocumentMargin(0)
-        self.text_input.setStyleSheet("""
-            QPlainTextEdit {
-                background: transparent;
-                color: #E4EAF2;
-                border: none;
-                padding: 0px 2px;
-                selection-background-color: rgba(94, 177, 245, 0.35);
-            }
-            QScrollBar:vertical { background: transparent; width: 3px; }
-            QScrollBar::handle:vertical {
-                background: rgba(255,255,255,0.14); border-radius: 1px;
-            }
-            QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical { height: 0; }
-        """)
-        self.text_input.document().contentsChanged.connect(self._schedule_resize_input)
-        self.text_input.textChanged.connect(self._sync_composer_enabled)
-        self.text_input.installEventFilter(self)
-
-        # Send ⇄ Stop lives in a bottom-pinned slot: centered on a single-line
-        # composer, anchored bottom-right once the field grows multiline.
-        btn_slot = QWidget()
-        btn_slot.setAttribute(Qt.WA_TranslucentBackground)
-        btn_slot_lay = QVBoxLayout(btn_slot)
-        btn_slot_lay.setContentsMargins(0, 0, 0, 1)
-        btn_slot_lay.addStretch(1)
-
-        self.send_btn = self._circle_btn("send", tip="Send message", active=False, accent=False)
-        self.send_btn.clicked.connect(self.send_text_message)
-        btn_slot_lay.addWidget(self.send_btn)
-
-        dock_row.addWidget(self.text_input, 1)
-        dock_row.addWidget(btn_slot, 0)
-        root.addWidget(self.dock)
+        self.composer = ChatComposer()
+        self.composer.submitted.connect(self.send_text_message)
+        self.composer.stop_requested.connect(self.stop_generation)
+        self.dock = self.composer
+        self.text_input = self.composer.text_input
+        self.send_btn = self.composer.send_btn
+        root.addWidget(self.composer)
         root.addSpacing(4)
 
         # ── Footer strip: context meter · 1-line log · resize hint (§5.9) ────
@@ -394,6 +346,8 @@ class SopnoHUDWindow(
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._apply_responsive()
+        if self.interaction_mode == "text":
+            self._sync_hero_geometry()
         if getattr(self, "dashboard", None) is not None and self.dashboard.isVisible():
             self.dashboard.setGeometry(self._dash_rect())
             self._dash_backdrop.setGeometry(self.central_widget.rect())
@@ -401,21 +355,9 @@ class SopnoHUDWindow(
     def keyPressEvent(self, event) -> None:
         super().keyPressEvent(event)
 
-    def eventFilter(self, obj, event) -> bool:
-        if obj is self.text_input:
-            if event.type() == QEvent.KeyPress:
-                if event.key() in (Qt.Key_Return, Qt.Key_Enter):
-                    if event.modifiers() & Qt.ShiftModifier:
-                        return False
-                    self.send_text_message()
-                    return True
-            elif event.type() in (QEvent.FocusIn, QEvent.FocusOut):
-                # Focus ring on the whole composer container (research rule).
-                focused = event.type() == QEvent.FocusIn
-                if focused != self._dock_focused:
-                    self._dock_focused = focused
-                    self._style_dock()
-        return super().eventFilter(obj, event)
+    def _take_from_layout(self, layout, widget) -> None:
+        if layout.indexOf(widget) >= 0:
+            layout.removeWidget(widget)
 
     def _apply_mode_layout(self) -> None:
         is_text = self.interaction_mode == "text"
@@ -432,42 +374,47 @@ class SopnoHUDWindow(
 
         root = self._root
         if is_text:
-            self._controls_row.removeWidget(self.wake_toggle)
-            self.wake_toggle.setParent(self.central_widget)
-            dock_idx = root.indexOf(self.dock)
-            if dock_idx >= 0:
-                root.insertWidget(dock_idx, self.wake_toggle, 0, Qt.AlignHCenter)
-            else:
-                root.addWidget(self.wake_toggle, 0, Qt.AlignHCenter)
-            self._controls_row.removeWidget(self.mode_toggle)
-            self.mode_toggle.setParent(self.central_widget)
-            root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
+            self._take_from_layout(self._controls_row, self.wake_toggle)
+            if root.indexOf(self.wake_toggle) < 0:
+                self.wake_toggle.setParent(self.central_widget)
+                dock_idx = root.indexOf(self.dock)
+                if dock_idx >= 0:
+                    root.insertWidget(dock_idx, self.wake_toggle, 0, Qt.AlignHCenter)
+                else:
+                    root.addWidget(self.wake_toggle, 0, Qt.AlignHCenter)
+
+            self._take_from_layout(self._controls_row, self.mode_toggle)
+            if root.indexOf(self.mode_toggle) < 0:
+                self.mode_toggle.setParent(self.central_widget)
+                root.addWidget(self.mode_toggle, 0, Qt.AlignHCenter)
+
             self.voice_stage.setVisible(False)
             self.text_stage.setVisible(True)
             self.chat.setVisible(True)
             self.voice_transcript.setVisible(False)
-            # Text page presence: robot + working status (no dot, no hint).
             self.status_dot.setVisible(False)
             self.context_label.setVisible(False)
             self.robot.setVisible(True)
             self.status_label.setVisible(True)
             self._sync_hero()
             self._sync_hero_geometry()
-            self.text_input.setFocus()
             self._start_placeholder_cycle()
         else:
-            root.removeWidget(self.wake_toggle)
+            self._take_from_layout(root, self.wake_toggle)
             self.wake_toggle.setParent(self.voice_stage)
-            self._controls_row.insertWidget(1, self.wake_toggle, 0, Qt.AlignVCenter)
-            root.removeWidget(self.mode_toggle)
+            if self._controls_row.indexOf(self.wake_toggle) < 0:
+                self._controls_row.insertWidget(1, self.wake_toggle, 0, Qt.AlignVCenter)
+
+            self._take_from_layout(root, self.mode_toggle)
             self.mode_toggle.setParent(self.voice_stage)
-            self._controls_row.insertWidget(2, self.mode_toggle, 0, Qt.AlignVCenter)
+            if self._controls_row.indexOf(self.mode_toggle) < 0:
+                self._controls_row.insertWidget(2, self.mode_toggle, 0, Qt.AlignVCenter)
+
             self.voice_stage.setVisible(True)
             self.voice_orb.setVisible(True)
             self.text_stage.setVisible(False)
             self.chat.setVisible(False)
             self.voice_transcript.setVisible(True)
-            # Voice page presence: dot + hint (robot stays text-page only).
             self.status_dot.setVisible(True)
             self.context_label.setVisible(True)
             self.robot.setVisible(False)
@@ -535,8 +482,12 @@ class SopnoHUDWindow(
         mode = mode.lower().strip()
         if mode not in ("voice", "text"):
             return
+        if mode == self.interaction_mode:
+            return
         self.interaction_mode = mode
         self._apply_mode_layout()
+        if mode == "text":
+            self.composer.focus_input()
         if hasattr(self, "worker") and self.worker:
             self.worker.set_mode(mode)
 
@@ -711,67 +662,6 @@ class SopnoHUDWindow(
             kind = "restore" if self._is_maximized else "maximize"
             ic = getattr(self, "_metrics", {}).get("icon", 14)
             btn.setIcon(_paint_icon(kind, ic, active=False))
-
-    def _auto_resize_input(self) -> None:
-        """Auto-grow bound by max height — derived from font metrics.
-
-        QTextDocument.size() is unreliable for plain-text documents (it can
-        report block counts instead of pixels), so the wrapped line count is
-        measured directly with QFontMetrics. setFixedHeight triggers layout,
-        which can re-enter here via resizeEvent → _apply_responsive; the
-        guard turns that cycle into a no-op instead of a stack overflow.
-        """
-        if getattr(self, "_resizing_input", False):
-            return
-        self._resizing_input = True
-        try:
-            inp = self.text_input
-            fm = QFontMetrics(inp.font())
-            min_h = fm.height() + 14                  # one comfortable line
-            # Measure slightly narrow so a scrollbar appearing/disappearing
-            # cannot flip the wrap count back and forth.
-            width = max(40, inp.viewport().width() - 3)
-            h = self._input_content_height(width) + 12
-            inp.setFixedHeight(int(max(min_h, min(h, 120))))
-        finally:
-            self._resizing_input = False
-
-    def _input_content_height(self, width: int) -> int:
-        """Pixel height of the editor's text incl. soft-wrapped lines."""
-        inp = self.text_input
-        doc = inp.document()
-        fm = QFontMetrics(inp.font())
-        lines = 0
-        for i in range(doc.blockCount()):
-            text = doc.findBlockByNumber(i).text()
-            if not text:
-                lines += 1
-                continue
-            br = fm.boundingRect(QRect(0, 0, width, 10000), Qt.TextWordWrap, text)
-            lines += max(1, -(-br.height() // fm.height()))
-        return int(lines * fm.height() + doc.documentMargin() * 2)
-
-    def _schedule_resize_input(self) -> None:
-        from PyQt5.QtCore import QTimer as _QTimer
-        _QTimer.singleShot(0, self._auto_resize_input)
-
-    def _style_dock(self) -> None:
-        """Composer container style: glass at rest, focus ring when active."""
-        m = getattr(self, "_metrics", None) or {}
-        radius = max(14, m.get("mode_r", 12) + 2)
-        if self._dock_focused:
-            border = "rgba(94, 177, 245, 0.38)"
-            bg = "rgba(255, 255, 255, 0.055)"
-        else:
-            border = "rgba(255, 255, 255, 0.07)"
-            bg = "rgba(255, 255, 255, 0.04)"
-        self.dock.setStyleSheet(f"""
-            QFrame#Dock {{
-                background: {bg};
-                border: 1px solid {border};
-                border-radius: {radius}px;
-            }}
-        """)
 
     def close_app(self) -> None:
         if hasattr(self, "worker") and self.worker:
