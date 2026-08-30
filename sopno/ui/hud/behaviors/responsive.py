@@ -122,25 +122,27 @@ class ResponsiveMixin:
             self.resize_hint.setVisible(footer == "full")
         self.log_display.setFont(QFont("IBM Plex Mono", m["log_pt"]))
 
-        mode_toggle = getattr(self, "mode_toggle", None)
-        if mode_toggle is not None:
-            mode_toggle.apply_scale(
-                pad_v=m["mode_pad_v"],
-                pad_h=m["mode_pad_h"],
-                font=m["mode_font"],
-                icon=m["mode_icon"],
-                radius=m["mode_r"],
-            )
-        dropdown = getattr(self, "reason_dropdown", None)
-        if dropdown is not None:
-            # Compact pill (icon + chevron only) below ~360 so the controls
-            # bar still fits with the two HoloToggles.
-            dropdown.apply_scale(
-                pad_v=3,
-                pad_h=8,
-                font=max(7, m["mode_font"] - 1),
-                compact=self.width() < 360,
-            )
+        for btn in (self.mode_toggle, self.wake_toggle):
+            if btn is not None:
+                btn.apply_scale(
+                    pad_v=m["mode_pad_v"],
+                    pad_h=m["mode_pad_h"],
+                    font=m["mode_font"],
+                    icon=m["mode_icon"],
+                    radius=m["mode_r"],
+                )
+        compact = self.width() < 360
+        for dd in (getattr(self, "reason_dropdown", None),
+                   getattr(self, "model_dropdown", None)):
+            if dd is not None:
+                # Compact pill (icon + chevron only) below ~360 so the two
+                # grouped controls still fit beside the HoloToggles.
+                dd.apply_scale(
+                    pad_v=3,
+                    pad_h=8,
+                    font=max(7, m["mode_font"] - 1),
+                    compact=compact,
+                )
         self.chat.apply_scale(body_pt=m["body_pt"])
         # §4.3: cap the transcript measure on wide windows (~70ch column).
         self.chat.set_column_width(560 if self.width() >= 440 else None)

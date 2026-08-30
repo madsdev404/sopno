@@ -32,7 +32,7 @@ from sopno.ui.hud.visuals.icons import _paint_icon
 from sopno.ui.hud.visuals.theme import MIN_SIZE, motion_enabled
 from sopno.ui.hud.widgets import AliveRobotFace, ChatComposer, ChatThread, ContextMeter, StatusDot, VoiceModeOrb
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
-from sopno.ui.hud.widgets.reasoning_dropdown import ReasoningModeDropdown
+from sopno.ui.hud.widgets.reasoning_dropdown import ModelDropdown, ReasoningModeDropdown
 from sopno.ui.hud.widgets.text_hero import TextHero
 from sopno.ui.hud.worker import AssistantWorker
 
@@ -203,30 +203,52 @@ class SopnoHUDWindow(
         self.voice_orb.setVisible(False)
         voice_layout.addWidget(self.voice_orb, 1)
 
-        # ── Controls bar: wake (left) · mode (left) · reasoning ▾ (right).
+        # ── Controls bar: two grouped components with space between —
+        # left: [voice|text] [wake], right: [model ▾] [mode ▾].
         # One widget so it travels whole between the voice stage and the text
         # root — the buttons always stay grouped. ──────────────────────────
         self.controls_bar = QWidget()
         self._controls_row = QHBoxLayout(self.controls_bar)
         self._controls_row.setContentsMargins(0, 0, 0, 0)
-        self._controls_row.setSpacing(6)
+        self._controls_row.setSpacing(0)
+
+        # Left component — interaction toggles. ────────────────────────────
+        self._left_controls = QWidget()
+        left_row = QHBoxLayout(self._left_controls)
+        left_row.setContentsMargins(0, 0, 0, 0)
+        left_row.setSpacing(6)
+
+        self.mode_toggle = HoloToggle("mic", "newspaper", initial=False)
+        self.mode_toggle.setToolTip("Toggle voice ↔ text mode")
+        self.mode_toggle.toggled.connect(self._on_mode_toggle)
+        left_row.addWidget(self.mode_toggle, 0, Qt.AlignVCenter)
 
         self.wake_toggle = HoloToggle("bell", "ear",
             initial=(getattr(settings, "listening_mode", "wake_word") == "always_on"))
         self.wake_toggle.setToolTip("Toggle wake word vs always-on listening")
         self.wake_toggle.toggled.connect(self._on_wake_toggle)
-        self._controls_row.addWidget(self.wake_toggle, 0, Qt.AlignVCenter)
+        left_row.addWidget(self.wake_toggle, 0, Qt.AlignVCenter)
 
-        self.mode_toggle = HoloToggle("mic", "newspaper", initial=False)
-        self.mode_toggle.setToolTip("Toggle voice ↔ text mode")
-        self.mode_toggle.toggled.connect(self._on_mode_toggle)
-        self._controls_row.addWidget(self.mode_toggle, 0, Qt.AlignVCenter)
+        self._controls_row.addWidget(self._left_controls, 0, Qt.AlignVCenter)
 
+        # Spacer between the two components. ────────────────────────────────
         self._controls_row.addStretch(1)
+
+        # Right component — model ▾ + mode ▾ dropdowns. ────────────────────
+        self._right_controls = QWidget()
+        right_row = QHBoxLayout(self._right_controls)
+        right_row.setContentsMargins(0, 0, 0, 0)
+        right_row.setSpacing(6)
+
+        self.model_dropdown = ModelDropdown()
+        self.model_dropdown.model_selected.connect(self._on_model_selected)
+        right_row.addWidget(self.model_dropdown, 0, Qt.AlignVCenter)
 
         self.reason_dropdown = ReasoningModeDropdown()
         self.reason_dropdown.mode_selected.connect(self._on_reasoning_selected)
-        self._controls_row.addWidget(self.reason_dropdown, 0, Qt.AlignVCenter)
+        right_row.addWidget(self.reason_dropdown, 0, Qt.AlignVCenter)
+
+        self._controls_row.addWidget(self._right_controls, 0, Qt.AlignVCenter)
 
         voice_layout.insertWidget(1, self.controls_bar, 0, Qt.AlignHCenter)
 
@@ -531,6 +553,14 @@ class SopnoHUDWindow(
     def _on_reasoning_selected(self, mode: str) -> None:
         """HUD dropdown → assistant. Auto restores the config default."""
         self.set_reasoning_mode(mode)
+
+    def _on_model_selected(self, model: str) -> None:
+        """HUD model dropdown — surface + log only (model switching deferred)."""
+        if hasattr(self, "worker") and self.worker:
+            try:
+                self.worker.log_message.emit(f"Model → {model}")
+            except Exception:
+                pass
 
     def set_reasoning_mode(self, mode: str) -> None:
         mode = (mode or "").strip().lower()

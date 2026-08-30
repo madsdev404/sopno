@@ -17,13 +17,16 @@ requested/approved on 2026-08-30 ("i didn't see any think mode btn in hud").
 Scope of the approved exception:
 
 - **ALLOWED (approved 2026-08-30):** `sopno/ui/hud/widgets/reasoning_dropdown.py`
-  (new), controls-bar wiring in `window.py` (create `reason_dropdown` +
-  `_on_reasoning_selected` / `set_reasoning_mode` / `_sync_reasoning_mode` /
-  `_on_reasoning_resolved`; `_apply_mode_layout` moved to travel the whole
-  `controls_bar`), `worker.py` (`reasoning_changed`/`thinking_changed` signals +
-  `set_reasoning_mode` bridge), `behaviors/responsive.py` scaling + compact.
+  (shared `_HoloDropDownBase` + `ReasoningModeDropdown` + new `ModelDropdown`),
+  controls-bar wiring in `window.py` (create `model_dropdown`/`reason_dropdown`
+  + `_on_model_selected`/`_on_reasoning_selected` / `set_reasoning_mode` /
+  `_sync_reasoning_mode` / `_on_reasoning_resolved`; `_apply_mode_layout`
+  travels the whole `controls_bar`), `worker.py`
+  (`reasoning_changed`/`thinking_changed` signals + `set_reasoning_mode`
+  bridge), `behaviors/responsive.py` scaling + compact.
 - **STILL FORBIDDEN:** anything else in the HUD/CLI — no other widget edits,
-  no CLI changes, no voice/text toggle changes.
+  no CLI changes, no voice/text toggle changes, and no `ModelDropdown` →
+  `client.chat()` wiring (deferred).
 
 Everything else below stands. Forbidden files:
 
@@ -905,30 +908,34 @@ Full suite: **702 tests, all green.** HUD/CLI untouched.
 User: "i didn't see any think mode btn in hud. have you forgot it?" — the §5.6
 deferral was overridden by explicit approval. First pass landed a 5-segment
 header pill; user rejected it as "looking like a mess": "i want it where others
-btn live. i want other btn at left, and think mode btn will be a dropdown type
-at right." Final design:
+btn live. ... think mode btn will be a dropdown type at right." Final design:
 
-- **New** `sopno/ui/hud/widgets/reasoning_dropdown.py` —
-  `ReasoningModeDropdown(QToolButton)`: holo pill in the HoloToggle family
-  (26px, glass track, border glow, energy rings, Lucide brain icon + chevron),
-  instant-popup themed `QMenu` (Auto | Quick | Think | Deep | Plan),
-  `mode_selected` signal, `set_mode(emit=)` normalize, `apply_scale(compact=)`.
-  Exported in `widgets/__init__.py` (replaced `reasoning_selector.py`).
-- **window.py** — dropdown lives in the **controls bar** on the right:
-  `[wake] [voice|text] ﹍ [Auto ▾]` (never the HoloToggles, §5.6);
+- **New/refactored** `sopno/ui/hud/widgets/reasoning_dropdown.py` — shared
+  `_HoloDropDownBase(QToolButton)`: holo pill in the HoloToggle family
+  (26px, glass track, border glow, energy rings, Lucide icon + chevron),
+  instant-popup themed `QMenu`, `set_value/current_value/apply_scale(compact=)`.
+  Two subclasses (each with its own signal):
+  - `ReasoningModeDropdown` (`mode_selected`, brain icon, Auto|Quick|Think|
+    Deep|Plan) — replaced the old reasoning_selector.py.
+  - `ModelDropdown` (`model_selected`, cpu icon) — selectable models, defaults
+    to `settings.model_name`, **surface + log only** (model switching deferred).
+  Exported in `widgets/__init__.py`.
+- **window.py** — the controls bar is now **two grouped components with space
+  between**: left `[voice|text] [wake]` (`_left_controls`), spacer, right
+  `[model ▾] [mode ▾]` (`_right_controls`); never the HoloToggles, §5.6.
+  `model_selected` → `_on_model_selected` (logs only);
   `mode_selected` → `_on_reasoning_selected` → `set_reasoning_mode` →
   `worker.set_reasoning_mode`. `worker.reasoning_changed` →
   `_on_reasoning_resolved` live-mirrors the resolved mode.
-  `_apply_mode_layout` now travels the **whole `controls_bar` widget** between
-  voice stage and text root (robust — buttons stay grouped instead of being
-  juggled per-toggle).
+  `_apply_mode_layout` travels the **whole `controls_bar` widget** between
+  the voice stage and the text root.
 - **worker.py** — added `reasoning_changed` + `thinking_changed` signals and
   `set_reasoning_mode()`; assistant's `thinking_callback`/`reasoning_callback`
   now wired.
 - **assistant** — `set_reasoning_mode()` sets `_forced_mode` (None = follow
   config); D2 priority: phrase override >> HUD force >> `settings.llm_mode` >>
   auto. Forced PLAN routes into the existing plan flow.
-- **responsive.py** — dropdown scales + `compact` (icon-only pill) below 360px.
-- Tests: `tests/ui/test_reasoning_dropdown.py` (10) + `TestForcedMode`
-  (4) in `tests/core/test_plan_mode.py`. Full suite re-run: **716 tests, all
-  green** (was 702).
+- **responsive.py** — both dropdowns scale + `compact` (icon-only pill) below
+  360px; `mode_toggle` and `wake_toggle` scaled together.
+- Tests: `tests/ui/test_reasoning_dropdown.py` (10 mode + 7 model +
+  worker bridge). Full suite re-run: **723 tests, all green** (was 716).

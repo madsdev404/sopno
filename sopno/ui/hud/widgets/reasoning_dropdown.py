@@ -1,13 +1,18 @@
 """
 sopno/ui/hud/widgets/reasoning_dropdown.py
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Compact holographic reasoning-mode dropdown — a [ Auto ▾ ] pill that
+Compact holographic dropdown pills — a [ Auto ▾ ] / [ qwen3:8b ▾ ] pill that
 visually belongs to the same family as the HoloToggle buttons (same 26px
 height, glass track, border glow) but adds a label + chevron to signal the
-menu. Clicking pops a themed menu (Auto | Quick | Think | Deep | Plan).
+menu. Clicking pops a themed QMenu.
 
-Sibling of `HoloToggle`, never overloading it (design §5.6). Emits the chosen
-mode; the HUD pushes it into the assistant via `set_reasoning_mode()`.
+Shared base `_HoloDropDownBase` drives reasoning-mode and model selection:
+- `ReasoningModeDropdown` — Auto | Quick | Think | Deep | Plan
+  (never overloads the Voice|Text HoloToggle, design §5.6).
+- `ModelDropdown` — selectable LLM names (HUD-only surface today; the
+  assistant's model switching is a deferred slot).
+
+The HUD pushes selections into the assistant via calls it wires itself.
 """
 
 import random
@@ -17,16 +22,28 @@ from PyQt5.QtGui import (
 )
 from PyQt5.QtWidgets import QAction, QActionGroup, QMenu, QToolButton
 
+from sopno.config.settings import settings
 from sopno.llm import modes
 from sopno.ui.hud.visuals.icons import _render_svg
 
 # (mode, short label, menu label, tooltip)
-_OPTIONS = [
+_MODE_OPTIONS = [
     (modes.AUTO, "Auto",  "Auto",     "Auto — phrase hints choose depth per turn"),
     (modes.QUICK, "Quick", "Quick",    "Quick — short, instant answers (fastest)"),
     (modes.THINKING, "Think", "Thinking", "Thinking — visible reasoning before the reply"),
     (modes.DEEP, "Deep",  "Deep",     "Deep — large budget, hard analysis"),
     (modes.PLAN, "Plan",  "Plan",     "Plan — plan-then-execute multi-step goals"),
+]
+
+# (model, short label, menu label, tooltip) — placeholder list; the HUD only
+# surfaces selection today ("don't work about model"). Defaults to the config.
+_MODEL_BASE = [getattr(settings, "model_name", "qwen3:8b") or "qwen3:8b"]
+_MODEL_CANDIDATES = [
+    "qwen3:14b", "qwen3:32b", "qwen3:4b-instruct", "llama3.1:8b", "phi4-mini:3.8b",
+]
+_MODEL_OPTIONS = [
+    (m, m if len(m) <= 14 else m[:12] + "…", m, f"Use {m} for replies")
+    for m in list(dict.fromkeys(_MODEL_BASE + _MODEL_CANDIDATES))
 ]
 
 _MENU_QSS = """
@@ -69,7 +86,7 @@ _PALETTE = {
 
 
 class _Rings:
-    """Slow energy ring rotation around the brain icon — family tie-in."""
+    """Slow energy ring rotation around the leading icon — family tie-in."""
 
     def __init__(self) -> None:
         self.angle = 0.0
@@ -85,35 +102,39 @@ class _Rings:
             p.drawArc(QRectF(cx - rr, cy - rr, rr * 2, rr * 2), int(self.angle * spd * 16), int(span * 16))
 
 
-class ReasoningModeDropdown(QToolButton):
-    """Compact holographic dropdown pill for quick/thinking/deep/plan/auto."""
+class _HoloDropDownBase(QToolButton):
+    """Shared holographic dropdown pill rendering + popup menu behaviour."""
 
-    mode_selected = pyqtSignal(str)
-
-    def __init__(self, parent=None) -> None:
+    def __init__(self, options, *, icon: str = "brain", title: str = "Selection",
+                 parent=None, width: int = 96, compact_width: int = 56) -> None:
         super().__init__(parent)
+        self._options = list(options)
+        self._icon = icon
+        self._title = title
+        self._full_w = width
+        self._compact_w = compact_width
         self._font = 9
         self._pv = 3
         self._ph = 8
         self._compact = False
-        self._current = modes.AUTO
+        self._current = options[0][0]
         self._rings = _Rings()
         self.setCursor(Qt.PointingHandCursor)
         self.setFocusPolicy(Qt.NoFocus)
         self.setPopupMode(QToolButton.InstantPopup)
         self.setArrowType(Qt.NoArrow)
-        self.setToolTip("Reasoning depth")
+        self.setToolTip(title)
 
         self._menu = QMenu(self)
         self._actions: dict[str, QAction] = {}
         group = QActionGroup(self)
-        for mode, short, label, tip in _OPTIONS:
+        for value, _short, label, tip in options:
             act = QAction(label, self)
             act.setCheckable(True)
             act.setToolTip(tip)
-            act.triggered.connect(lambda _c, m=mode: self._choose(m))
+            act.triggered.connect(lambda _c, v=value: self._choose(v))
             group.addAction(act)
-            self._actions[mode] = act
+            self._actions[value] = act
             self._menu.addAction(act)
         self._menu.triggered.connect(lambda act: None)
         self.setMenu(self._menu)
@@ -134,24 +155,27 @@ class ReasoningModeDropdown(QToolButton):
         self._compact = compact
         self._apply_style()
 
-    def set_mode(self, mode: str, *, emit: bool = False) -> None:
-        """Select a mode. With `emit`, triggers mode_selected."""
-        mode = modes.normalize(mode) or modes.AUTO
-        if mode != self._current:
-            self._current = mode
+    def set_value(self, value: str, *, emit: bool = False) -> None:
+        """Select an option. With `emit`, triggers the concrete signal."""
+        value = self._normalize(value)
+        if value != self._current:
+            self._current = value
             self._apply_style()
         if emit:
-            self.mode_selected.emit(mode)
+            self._emit(value)
 
-    def current_mode(self) -> str:
+    def current_value(self) -> str:
         return self._current
 
-    @property
-    def checked_mode(self) -> str:
-        return self._current
+    def _normalize(self, value: str) -> str:
+        value = (value or "").strip().lower()
+        return value if any(o[0] == value for o in self._options) else self._options[0][0]
 
-    def _choose(self, mode: str) -> None:
-        self.set_mode(mode, emit=True)
+    def _emit(self, _value: str) -> None:
+        pass
+
+    def _choose(self, value: str) -> None:
+        self.set_value(value, emit=True)
 
     # ── internals ───────────────────────────────────────────────────────
 
@@ -159,21 +183,25 @@ class ReasoningModeDropdown(QToolButton):
         self._rings.tick(16.0)
         self.update()
 
+    def _label(self, value: str) -> str:
+        return next((s for v, s, _l, _t in self._options if v == value), "")
+
     def _apply_style(self) -> None:
-        w = 96 if not self._compact else 56
+        w = self._full_w if not self._compact else self._compact_w
         self.setFixedSize(w, 26)
         self._menu.setStyleSheet(_MENU_QSS.format(
             r=8, pv=max(3, self._pv), ph=max(8, self._ph + 6), font=max(9, self._font),
         ))
-        for mode, act in self._actions.items():
-            act.setChecked(mode == self._current)
-        short = next((s for m, s, _l, _t in _OPTIONS if m == self._current), "")
-        self.setToolTip(f"Reasoning depth (current: {short})")
+        for value, act in self._actions.items():
+            act.setChecked(value == self._current)
+        short = self._label(self._current)
+        self.setToolTip(f"{self._title} (current: {short})")
         self.update()
 
     def sizeHint(self) -> object:
         from PyQt5.QtCore import QSize
-        return QSize(96 if not self._compact else 56, 26)
+        w = self._full_w if not self._compact else self._compact_w
+        return QSize(w, 26)
 
     def paintEvent(self, _event) -> None:
         q = QPainter(self)
@@ -212,17 +240,17 @@ class ReasoningModeDropdown(QToolButton):
         cy = h / 2
         left = 14
 
-        # ── brain icon with energy rings ─────────────────────────────
+        # ── leading icon with energy rings ───────────────────────────
         icon_sz = 12
         self._rings.paint(q, left, cy, icon_sz / 2, C["accent"])
         icon_pm = _render_svg(
-            "brain", icon_sz, "#B9A6FF" if not down else "#E8DFFF",
+            self._icon, icon_sz, "#B9A6FF" if not down else "#E8DFFF",
         )
         q.drawPixmap(int(left - icon_sz / 2), int(cy - icon_sz / 2), icon_pm)
 
         # ── label ────────────────────────────────────────────────────
         if not self._compact:
-            short = next((s for m, s, _l, _t in _OPTIONS if m == self._current), "")
+            short = self._label(self._current)
             q.setPen(QColor(C["label"]))
             q.setFont(self.font())
             q.drawText(
@@ -245,3 +273,50 @@ class ReasoningModeDropdown(QToolButton):
         q.setClipping(False)
 
         q.end()
+
+
+class ReasoningModeDropdown(_HoloDropDownBase):
+    """Compact holographic dropdown pill for quick/thinking/deep/plan/auto."""
+
+    mode_selected = pyqtSignal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(_MODE_OPTIONS, icon="brain", title="Reasoning depth",
+                         parent=parent)
+
+    def set_mode(self, mode: str, *, emit: bool = False) -> None:
+        """Select a mode. With `emit`, triggers mode_selected."""
+        self.set_value(mode, emit=emit)
+
+    def current_mode(self) -> str:
+        return self._current
+
+    @property
+    def checked_mode(self) -> str:
+        return self._current
+
+    def _normalize(self, mode: str) -> str:
+        return modes.normalize(mode) or modes.AUTO
+
+    def _emit(self, mode: str) -> None:
+        self.mode_selected.emit(mode)
+
+
+class ModelDropdown(_HoloDropDownBase):
+    """Holographic dropdown pill for selectable LLM models (HUD surface only)."""
+
+    model_selected = pyqtSignal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(_MODEL_OPTIONS, icon="cpu", title="Model model",
+                         parent=parent, width=108, compact_width=56)
+
+    def set_model(self, model: str, *, emit: bool = False) -> None:
+        """Select a model. With `emit`, triggers model_selected."""
+        self.set_value(model, emit=emit)
+
+    def current_model(self) -> str:
+        return self._current
+
+    def _emit(self, model: str) -> None:
+        self.model_selected.emit(model)

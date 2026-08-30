@@ -9,7 +9,7 @@ from sopno.ui.hud.widgets.chat import ChatThread
 from sopno.ui.hud.widgets.composer import ChatComposer
 from sopno.ui.hud.widgets.context_meter import ContextMeter
 from sopno.ui.hud.widgets.holo_toggle import HoloToggle
-from sopno.ui.hud.widgets.reasoning_dropdown import ReasoningModeDropdown
+from sopno.ui.hud.widgets.reasoning_dropdown import ModelDropdown, ReasoningModeDropdown
 from sopno.ui.hud.widgets.robot import AliveRobotFace
 from sopno.ui.hud.widgets.status_dot import StatusDot
 from sopno.ui.hud.widgets.text_hero import TextHero
@@ -20,6 +20,7 @@ __all__ = [
     "ChatThread",
     "ContextMeter",
     "HoloToggle",
+    "ModelDropdown",
     "ReasoningModeDropdown",
     "AliveRobotFace",
     "StatusDot",
